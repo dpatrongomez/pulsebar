@@ -1,0 +1,313 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pulsebar.app/schemas/status.schema.json",
+  "title": "pulsebar status --json",
+  "type": "object",
+  "properties": {
+    "timestamp": {
+      "type": "integer"
+    },
+    "hostname": {
+      "type": "string"
+    },
+    "process_count": {
+      "type": "integer"
+    },
+    "app_count": {
+      "type": "integer"
+    },
+    "cpu": {
+      "type": "object",
+      "properties": {
+        "total_pct": {
+          "type": "number"
+        },
+        "user_pct": {
+          "type": "number"
+        },
+        "system_pct": {
+          "type": "number"
+        },
+        "load_avg": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          },
+          "minItems": 3,
+          "maxItems": 3
+        },
+        "cores": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "total_pct",
+        "user_pct",
+        "system_pct",
+        "load_avg",
+        "cores"
+      ],
+      "additionalProperties": false
+    },
+    "memory": {
+      "type": "object",
+      "properties": {
+        "total_bytes": {
+          "type": "integer"
+        },
+        "used_bytes": {
+          "type": "integer"
+        },
+        "app_bytes": {
+          "type": "integer"
+        },
+        "wired_bytes": {
+          "type": "integer"
+        },
+        "compressed_bytes": {
+          "type": "integer"
+        },
+        "cached_bytes": {
+          "type": "integer"
+        },
+        "swap_used_bytes": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "total_bytes",
+        "used_bytes",
+        "app_bytes",
+        "wired_bytes",
+        "compressed_bytes",
+        "cached_bytes",
+        "swap_used_bytes"
+      ],
+      "additionalProperties": false
+    },
+    "disk": {
+      "type": "object",
+      "properties": {
+        "read_bps": {
+          "type": "number"
+        },
+        "write_bps": {
+          "type": "number"
+        },
+        "boot_free_bytes": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "boot_total_bytes": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "read_bps",
+        "write_bps",
+        "boot_free_bytes",
+        "boot_total_bytes"
+      ],
+      "additionalProperties": false
+    },
+    "network": {
+      "type": "object",
+      "properties": {
+        "rx_bps": {
+          "type": "number"
+        },
+        "tx_bps": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "rx_bps",
+        "tx_bps"
+      ],
+      "additionalProperties": false
+    },
+    "gpu": {
+      "type": "object",
+      "properties": {
+        "available": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        },
+        "utilization_pct": {
+          "type": "number"
+        },
+        "power_w": {
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "available",
+        "name",
+        "utilization_pct",
+        "power_w"
+      ],
+      "additionalProperties": false
+    },
+    "neural": {
+      "type": "object",
+      "properties": {
+        "available": {
+          "type": "boolean"
+        },
+        "power_w": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "available",
+        "power_w"
+      ],
+      "additionalProperties": false
+    },
+    "battery": {
+      "type": "object",
+      "properties": {
+        "present": {
+          "type": "boolean"
+        },
+        "percent": {
+          "type": "number"
+        },
+        "charging": {
+          "type": "boolean"
+        },
+        "on_ac": {
+          "type": "boolean"
+        },
+        "time_remaining_min": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "power_w": {
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "present",
+        "percent",
+        "charging",
+        "on_ac",
+        "time_remaining_min",
+        "power_w"
+      ],
+      "additionalProperties": false
+    },
+    "temperature": {
+      "type": "object",
+      "properties": {
+        "cpu_c": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "gpu_c": {
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "cpu_c",
+        "gpu_c"
+      ],
+      "additionalProperties": false
+    },
+    "power_w": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "busiest": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "app": {
+            "type": "string"
+          },
+          "bundle_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "value": {
+            "type": "number"
+          },
+          "metric": {
+            "enum": [
+              "cpu",
+              "memory",
+              "energy",
+              "disk",
+              "network"
+            ]
+          },
+          "cpu_pct": {
+            "type": "number"
+          },
+          "mem_bytes": {
+            "type": "integer"
+          },
+          "energy_w": {
+            "type": "number"
+          },
+          "process_count": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "app",
+          "bundle_id",
+          "value",
+          "metric",
+          "cpu_pct",
+          "mem_bytes",
+          "energy_w",
+          "process_count"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "timestamp",
+    "hostname",
+    "process_count",
+    "app_count",
+    "cpu",
+    "memory",
+    "disk",
+    "network",
+    "gpu",
+    "neural",
+    "battery",
+    "temperature",
+    "power_w",
+    "busiest"
+  ],
+  "additionalProperties": false
+}

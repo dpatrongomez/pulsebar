@@ -1,0 +1,5 @@
+#  APP                   MEMORY  PROCS
+1  Google Chrome       21.23 GB     96
+2  Visual Studio Code   8.17 GB     41
+3  Terminal             2.86 GB     10
+4  macOS                1.72 GB      3

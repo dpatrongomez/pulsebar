@@ -1,0 +1,139 @@
+//! Native UI, split into two processes (see `daemon` for why):
+//! * `run_agent`  — menu bar status items on a bare NSApplication run loop (no GPU window);
+//! * `run_window` — the egui window, launched on demand and exiting when closed.
+
+mod app;
+mod icons;
+pub mod tray;
+mod widgets;
+
+use std::sync::Arc;
+
+use serde::{Deserialize, Serialize};
+
+use crate::daemon::{self, Role};
+use crate::settings::{Settings, Tab};
+use crate::{actions, paths, sys};
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Nav {
+    pub tab: Tab,
+    pub app: Option<String>,
+    pub at_ms: i64,
+}
+
+/// Bring this process's windows to the front. Main thread only.
+pub fn show_app() {
+    #[cfg(target_os = "macos")]
+    if let Some(mtm) = objc2::MainThreadMarker::new() {
+        let app = objc2_app_kit::NSApplication::sharedApplication(mtm);
+        app.unhide(None);
+        #[allow(deprecated)]
+        app.activateIgnoringOtherApps(true);
+    }
+}
+
+fn window_running() -> bool {
+    std::fs::read_to_string(paths::window_pid_file())
+        .ok()
+        .and_then(|s| s.trim().parse::<i32>().ok())
+        .is_some_and(|pid| pid > 1 && sys::pid_alive(pid))
+}
+
+/// Open (or focus) the window on a tab, optionally scrolled to an app.
+pub fn open_window(tab: Tab, app: Option<String>) {
+    let nav = Nav { tab, app: app.clone(), at_ms: sys::now_ms() };
+    let _ = paths::ensure_dirs();
+    let _ = std::fs::write(paths::nav_file(), serde_json::to_vec(&nav).unwrap_or_default());
+    if window_running() {
+        return; // the window polls nav.json and activates itself
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        let tab_s = serde_json::to_value(tab).ok().and_then(|v| v.as_str().map(str::to_string)).unwrap_or_else(|| "overview".into());
+        let mut cmd = std::process::Command::new(exe);
+        cmd.args(["window", "--tab", &tab_s]);
+        if let Some(a) = app {
+            cmd.args(["--app", &a]);
+        }
+        let _ = cmd.spawn();
+    }
+}
+
+/// Menu bar agent: tray items + sampler (history, alerts, live.json). No dock icon.
+pub fn run_agent() -> anyhow::Result<()> {
+    let _ = paths::ensure_dirs();
+    let settings = Settings::load();
+    #[cfg(target_os = "macos")]
+    {
+        use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy};
+        let mtm = objc2::MainThreadMarker::new().ok_or_else(|| anyhow::anyhow!("must run on the main thread"))?;
+        let app = NSApplication::sharedApplication(mtm);
+        app.setActivationPolicy(NSApplicationActivationPolicy::Accessory);
+
+        let shared: Arc<daemon::Shared> = daemon::spawn(settings, Role::Agent);
+        let last_prompted = std::sync::Mutex::new(String::new());
+        *shared.on_tick.lock().unwrap() = Some(Box::new(move || {
+            tray::schedule_refresh();
+            // An MCP quit request needs a human: make sure the window is up.
+            if let Some(first) = actions::list_pending().first() {
+                let mut lp = last_prompted.lock().unwrap();
+                if *lp != first.id {
+                    *lp = first.id.clone();
+                    open_window(Tab::Overview, None);
+                }
+            }
+        }));
+        tray::install(shared.clone());
+        tray_icon::menu::MenuEvent::set_event_handler(Some(|e: tray_icon::menu::MenuEvent| {
+            let id = e.id.0.clone();
+            if id == "pb:quit" {
+                if let Ok(pid) = std::fs::read_to_string(paths::window_pid_file())
+                    && let Ok(pid) = pid.trim().parse::<i32>()
+                        && sys::pid_alive(pid) {
+                            unsafe { libc::kill(pid, libc::SIGTERM) };
+                        }
+                std::process::exit(0);
+            }
+            if let Some((tab, app)) = tray::target_for(&id) {
+                open_window(tab, app);
+            }
+        }));
+        if std::env::var_os("PULSEBAR_NO_WINDOW").is_none() && !settings_has_launched_before() {
+            open_window(Tab::Overview, None);
+        }
+        app.run();
+    }
+    Ok(())
+}
+
+fn settings_has_launched_before() -> bool {
+    let marker = paths::app_support().join(".launched");
+    let seen = marker.exists();
+    let _ = std::fs::write(marker, b"1");
+    seen
+}
+
+/// The window process.
+pub fn run_window(tab: Tab, app: Option<String>) -> anyhow::Result<()> {
+    let _ = paths::ensure_dirs();
+    let _ = std::fs::write(paths::window_pid_file(), std::process::id().to_string());
+    let settings = Settings::load();
+    let shared = daemon::spawn(settings, Role::Window);
+    let options = eframe::NativeOptions {
+        viewport: eframe::egui::ViewportBuilder::default()
+            .with_title("PulseBar")
+            .with_inner_size([1180.0, 760.0])
+            .with_min_inner_size([820.0, 520.0]),
+        ..Default::default()
+    };
+    let r = eframe::run_native(
+        "PulseBar",
+        options,
+        Box::new(move |cc| {
+            show_app();
+            Ok(Box::new(app::PulseApp::new(cc, shared, tab, app)))
+        }),
+    );
+    let _ = std::fs::remove_file(paths::window_pid_file());
+    r.map_err(|e| anyhow::anyhow!("{e}"))
+}

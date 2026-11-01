@@ -1,0 +1,5 @@
+#  APP                 NETWORK  PROCS
+1  Google Chrome         0 B/s     96
+2  Terminal              0 B/s     10
+3  Visual Studio Code    0 B/s     41
+4  macOS                 0 B/s      3

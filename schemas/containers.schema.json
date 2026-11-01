@@ -1,0 +1,107 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pulsebar.app/schemas/containers.schema.json",
+  "title": "pulsebar containers --json",
+  "type": "object",
+  "properties": {
+    "docker_available": {
+      "type": "boolean"
+    },
+    "near_limit": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "stacks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "project_hint": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "containers": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "image": {
+                  "type": "string"
+                },
+                "state": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string"
+                },
+                "up": {
+                  "type": "boolean"
+                },
+                "mem_bytes": {
+                  "type": "integer"
+                },
+                "mem_limit": {
+                  "type": "integer"
+                },
+                "mem_pct_of_limit": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "cpu_pct": {
+                  "type": "number"
+                },
+                "published_ports": {
+                  "type": "array",
+                  "items": {
+                    "type": "integer"
+                  }
+                }
+              },
+              "required": [
+                "id",
+                "name",
+                "image",
+                "state",
+                "status",
+                "up",
+                "mem_bytes",
+                "mem_limit",
+                "mem_pct_of_limit",
+                "cpu_pct",
+                "published_ports"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "name",
+          "project_hint",
+          "containers"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "docker_available",
+    "near_limit",
+    "stacks"
+  ],
+  "additionalProperties": false
+}

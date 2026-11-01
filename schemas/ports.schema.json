@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pulsebar.app/schemas/ports.schema.json",
+  "title": "pulsebar ports --json",
+  "type": "object",
+  "properties": {
+    "ports": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "port": {
+            "type": "integer"
+          },
+          "address": {
+            "type": "string"
+          },
+          "pid": {
+            "type": "integer"
+          },
+          "process": {
+            "type": "string"
+          },
+          "command": {
+            "type": "string"
+          },
+          "app": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "project": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "mem_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "idle_secs": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "port",
+          "address",
+          "pid",
+          "process",
+          "command",
+          "app",
+          "project",
+          "mem_bytes",
+          "idle_secs"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "ports"
+  ],
+  "additionalProperties": false
+}

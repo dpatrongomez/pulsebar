@@ -1,0 +1,13 @@
+PulseBar · dev-mac · 150 processes → 4 apps
+
+CPU       27 %   user 19 % · system 8 % · load 3.41 2.80 2.10
+Memory    33.20 GB of 36.00 GB   app 22.00 GB · wired 4.20 GB · compressed 7.00 GB · swap 1.20 GB
+Disk      412.00 GB free of 994.00 GB   read 1.2 MB/s · write 3.4 MB/s
+Network   ↓ 2.4 MB/s   ↑ 310 KB/s
+GPU       12 %   Apple M3 Max
+Neural    0.40 W
+Battery   80 %   on battery · 5 h 0 min left
+Temp      CPU 55 °C · GPU 48 °C
+Power     14.2 W
+
+Busiest right now: Google Chrome 23 % · Terminal 20 % · macOS 8 %

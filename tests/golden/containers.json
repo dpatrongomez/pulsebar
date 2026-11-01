@@ -1,0 +1,63 @@
+{
+  "docker_available": true,
+  "near_limit": [
+    "rabbitmq — 206 MB — 86 % of 240 MB — up 3 hours — port 5672"
+  ],
+  "stacks": [
+    {
+      "containers": [
+        {
+          "cpu_pct": 1.5,
+          "id": "a1b2c3d4e5f6",
+          "image": "rabbitmq:3",
+          "mem_bytes": 206000000,
+          "mem_limit": 240000000,
+          "mem_pct_of_limit": 85.8,
+          "name": "rabbitmq",
+          "published_ports": [
+            5672
+          ],
+          "state": "running",
+          "status": "Up 3 hours",
+          "up": true
+        },
+        {
+          "cpu_pct": 0.4,
+          "id": "0f9e8d7c6b5a",
+          "image": "postgres:16",
+          "mem_bytes": 120000000,
+          "mem_limit": 0,
+          "mem_pct_of_limit": null,
+          "name": "postgres",
+          "published_ports": [
+            5432
+          ],
+          "state": "running",
+          "status": "Up 3 hours",
+          "up": true
+        }
+      ],
+      "name": "shop",
+      "project_hint": "/Users/me/code/shop"
+    },
+    {
+      "containers": [
+        {
+          "cpu_pct": 0.0,
+          "id": "112233445566",
+          "image": "redis:7",
+          "mem_bytes": 0,
+          "mem_limit": 0,
+          "mem_pct_of_limit": null,
+          "name": "redis",
+          "published_ports": [],
+          "state": "exited",
+          "status": "Exited (0) 2 days ago",
+          "up": false
+        }
+      ],
+      "name": "standalone",
+      "project_hint": null
+    }
+  ]
+}

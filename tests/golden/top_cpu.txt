@@ -1,0 +1,5 @@
+#  APP                  CPU  PROCS
+1  Google Chrome       23 %     96
+2  Terminal            20 %     10
+3  macOS                8 %      3
+4  Visual Studio Code   7 %     41

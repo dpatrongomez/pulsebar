@@ -1,0 +1,17 @@
+{
+  "in_use": true,
+  "listeners": [
+    {
+      "address": "*",
+      "app": "Terminal",
+      "command": "node next dev --port 4322",
+      "idle_secs": 7200,
+      "mem_bytes": 458000000,
+      "pid": 702,
+      "port": 4322,
+      "process": "node",
+      "project": "storefront-web"
+    }
+  ],
+  "port": 4322
+}

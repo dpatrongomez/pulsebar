@@ -1,0 +1,28 @@
+{
+  "plans": [
+    {
+      "headline": "Claude · Max 20x · This week 72% left · Resets 4 d 2 h",
+      "limit_kind": "tokens",
+      "pace": "ahead",
+      "pace_text": "well under limit",
+      "plan": "Max 20x",
+      "provider": "Claude",
+      "resets_at": 1793901600,
+      "source": "~/.claude/projects",
+      "used_pct": 28.0,
+      "window": "week"
+    },
+    {
+      "headline": "Codex · Pro · 5h window 19% left · Resets 2 h 0 min",
+      "limit_kind": "usage",
+      "pace": "runs_out",
+      "pace_text": "runs out in 42 min",
+      "plan": "Pro",
+      "provider": "Codex",
+      "resets_at": 1793556000,
+      "source": "~/.codex/sessions",
+      "used_pct": 81.0,
+      "window": "5h"
+    }
+  ]
+}

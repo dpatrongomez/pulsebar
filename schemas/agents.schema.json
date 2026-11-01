@@ -1,0 +1,107 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pulsebar.app/schemas/agents.schema.json",
+  "title": "pulsebar agents --json",
+  "type": "object",
+  "properties": {
+    "agents": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "agent": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "claude_code",
+              "codex",
+              "gemini_cli",
+              "cursor_agent",
+              "github_copilot"
+            ]
+          },
+          "pid": {
+            "type": "integer"
+          },
+          "project": {
+            "type": "string"
+          },
+          "branch": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "state": {
+            "enum": [
+              "working",
+              "waiting",
+              "idle"
+            ]
+          },
+          "started_at": {
+            "type": "integer"
+          },
+          "mem_bytes": {
+            "type": "integer"
+          },
+          "cpu_pct": {
+            "type": "number"
+          },
+          "started": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "pid": {
+                  "type": "integer"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "role": {
+                  "type": "string"
+                },
+                "mem_bytes": {
+                  "type": "integer"
+                },
+                "ports": {
+                  "type": "array",
+                  "items": {
+                    "type": "integer"
+                  }
+                }
+              },
+              "required": [
+                "pid",
+                "name",
+                "role",
+                "mem_bytes",
+                "ports"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "agent",
+          "kind",
+          "pid",
+          "project",
+          "branch",
+          "state",
+          "started_at",
+          "mem_bytes",
+          "cpu_pct",
+          "started"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "agents"
+  ],
+  "additionalProperties": false
+}

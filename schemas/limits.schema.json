@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pulsebar.app/schemas/limits.schema.json",
+  "title": "pulsebar limits --json",
+  "type": "object",
+  "properties": {
+    "plans": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "provider": {
+            "type": "string"
+          },
+          "plan": {
+            "type": "string"
+          },
+          "window": {
+            "type": "string"
+          },
+          "limit_kind": {
+            "type": "string"
+          },
+          "used_pct": {
+            "type": "number"
+          },
+          "resets_at": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "pace": {
+            "enum": [
+              "on_pace",
+              "ahead",
+              "runs_out",
+              "unknown"
+            ]
+          },
+          "pace_text": {
+            "type": "string"
+          },
+          "headline": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "plan",
+          "window",
+          "limit_kind",
+          "used_pct",
+          "resets_at",
+          "pace",
+          "pace_text",
+          "headline",
+          "source"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "plans"
+  ],
+  "additionalProperties": false
+}

@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pulsebar.app/schemas/what_is_on_port.schema.json",
+  "title": "pulsebar what is on port --json",
+  "type": "object",
+  "properties": {
+    "port": {
+      "type": "integer"
+    },
+    "in_use": {
+      "type": "boolean"
+    },
+    "listeners": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "port": {
+            "type": "integer"
+          },
+          "address": {
+            "type": "string"
+          },
+          "pid": {
+            "type": "integer"
+          },
+          "process": {
+            "type": "string"
+          },
+          "command": {
+            "type": "string"
+          },
+          "app": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "project": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "mem_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "idle_secs": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "port",
+          "address",
+          "pid",
+          "process",
+          "command",
+          "app",
+          "project",
+          "mem_bytes",
+          "idle_secs"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "port",
+    "in_use",
+    "listeners"
+  ],
+  "additionalProperties": false
+}

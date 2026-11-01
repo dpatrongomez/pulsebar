@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pulsebar.app/schemas/top.schema.json",
+  "title": "pulsebar top --json",
+  "type": "object",
+  "properties": {
+    "metric": {
+      "enum": [
+        "cpu",
+        "memory",
+        "energy",
+        "disk",
+        "network"
+      ]
+    },
+    "apps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "app": {
+            "type": "string"
+          },
+          "bundle_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "value": {
+            "type": "number"
+          },
+          "metric": {
+            "enum": [
+              "cpu",
+              "memory",
+              "energy",
+              "disk",
+              "network"
+            ]
+          },
+          "cpu_pct": {
+            "type": "number"
+          },
+          "mem_bytes": {
+            "type": "integer"
+          },
+          "energy_w": {
+            "type": "number"
+          },
+          "process_count": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "app",
+          "bundle_id",
+          "value",
+          "metric",
+          "cpu_pct",
+          "mem_bytes",
+          "energy_w",
+          "process_count"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "metric",
+    "apps"
+  ],
+  "additionalProperties": false
+}

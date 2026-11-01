@@ -1,0 +1,2 @@
+AGENT        PID  PROJECT  STATE     MEMORY   CPU      UPTIME  STARTED
+Claude Code  704  shop     working  1.96 GB  19 %  1 h 30 min  dev server :3000, Chrome for Testing, MCP server

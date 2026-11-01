@@ -1,0 +1,37 @@
+{
+  "ports": [
+    {
+      "address": "*",
+      "app": "Terminal",
+      "command": "node next dev --port 4322",
+      "idle_secs": 7200,
+      "mem_bytes": 458000000,
+      "pid": 702,
+      "port": 4322,
+      "process": "node",
+      "project": "storefront-web"
+    },
+    {
+      "address": "*",
+      "app": "Terminal",
+      "command": "node next dev --port 3000",
+      "idle_secs": 0,
+      "mem_bytes": 412000000,
+      "pid": 705,
+      "port": 3000,
+      "process": "node",
+      "project": "shop"
+    },
+    {
+      "address": "127.0.0.1",
+      "app": "Terminal",
+      "command": "python3 -m uvicorn main:app --port 8000",
+      "idle_secs": 4000,
+      "mem_bytes": 180000000,
+      "pid": 709,
+      "port": 8000,
+      "process": "python3",
+      "project": "api"
+    }
+  ]
+}

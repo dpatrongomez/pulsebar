@@ -1,0 +1,71 @@
+{
+  "idle_banner": "2 dev servers are running but idle. Stopping them frees 638 MB and ports 4322, 8000.",
+  "projects": [
+    {
+      "cpu_pct": 19.0,
+      "folder_path": "/Users/me/code/shop",
+      "mem_bytes": 1962000000,
+      "name": "shop",
+      "ports": [
+        3000
+      ],
+      "process_count": 5,
+      "servers": [
+        {
+          "command": "node next dev --port 3000",
+          "idle": false,
+          "idle_secs": 0,
+          "mem_bytes": 412000000,
+          "pid": 705,
+          "port": 3000,
+          "started_at": 1793547000
+        }
+      ],
+      "state": "serving"
+    },
+    {
+      "cpu_pct": 0.0,
+      "folder_path": "/Users/me/code/storefront-web",
+      "mem_bytes": 463000000,
+      "name": "storefront-web",
+      "ports": [
+        4322
+      ],
+      "process_count": 2,
+      "servers": [
+        {
+          "command": "node next dev --port 4322",
+          "idle": true,
+          "idle_secs": 7200,
+          "mem_bytes": 458000000,
+          "pid": 702,
+          "port": 4322,
+          "started_at": 1793538000
+        }
+      ],
+      "state": "idle"
+    },
+    {
+      "cpu_pct": 0.0,
+      "folder_path": "/Users/me/code/api",
+      "mem_bytes": 185000000,
+      "name": "api",
+      "ports": [
+        8000
+      ],
+      "process_count": 2,
+      "servers": [
+        {
+          "command": "python3 -m uvicorn main:app",
+          "idle": true,
+          "idle_secs": 4000,
+          "mem_bytes": 180000000,
+          "pid": 709,
+          "port": 8000,
+          "started_at": 1793541600
+        }
+      ],
+      "state": "idle"
+    }
+  ]
+}

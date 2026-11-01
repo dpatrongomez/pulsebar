@@ -1,0 +1,5 @@
+PROVIDER  PLAN     WINDOW  USED  RESETS IN  PACE
+Claude    Max 20x  week    28 %    4 d 2 h  well under limit
+Codex     Pro      5h      81 %  2 h 0 min  runs out in 42 min
+Claude · Max 20x · This week 72% left · Resets 4 d 2 h
+Codex · Pro · 5h window 19% left · Resets 2 h 0 min

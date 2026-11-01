@@ -1,0 +1,40 @@
+{
+  "agents": [
+    {
+      "agent": "Claude Code",
+      "branch": "feat/checkout",
+      "cpu_pct": 19.0,
+      "kind": "claude_code",
+      "mem_bytes": 1957000000,
+      "pid": 704,
+      "project": "shop",
+      "started": [
+        {
+          "mem_bytes": 412000000,
+          "name": "node",
+          "pid": 705,
+          "ports": [
+            3000
+          ],
+          "role": "dev server :3000"
+        },
+        {
+          "mem_bytes": 380000000,
+          "name": "Google Chrome for Testing",
+          "pid": 706,
+          "ports": [],
+          "role": "Chrome for Testing"
+        },
+        {
+          "mem_bytes": 95000000,
+          "name": "node",
+          "pid": 707,
+          "ports": [],
+          "role": "MCP server"
+        }
+      ],
+      "started_at": 1793543400,
+      "state": "working"
+    }
+  ]
+}

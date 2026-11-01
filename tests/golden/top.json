@@ -1,0 +1,45 @@
+{
+  "apps": [
+    {
+      "app": "Google Chrome",
+      "bundle_id": "com.google.Chrome",
+      "cpu_pct": 23.0,
+      "energy_w": 7.25,
+      "mem_bytes": 21230000000,
+      "metric": "memory",
+      "process_count": 96,
+      "value": 21230000000.0
+    },
+    {
+      "app": "Visual Studio Code",
+      "bundle_id": "com.microsoft.VSCode",
+      "cpu_pct": 7.0,
+      "energy_w": 2.0,
+      "mem_bytes": 8170000000,
+      "metric": "memory",
+      "process_count": 41,
+      "value": 8170000000.0
+    },
+    {
+      "app": "Terminal",
+      "bundle_id": "com.apple.Terminal",
+      "cpu_pct": 19.5,
+      "energy_w": 0.0,
+      "mem_bytes": 2860000000,
+      "metric": "memory",
+      "process_count": 10,
+      "value": 2860000000.0
+    },
+    {
+      "app": "macOS",
+      "bundle_id": null,
+      "cpu_pct": 8.1,
+      "energy_w": 0.0,
+      "mem_bytes": 1720000000,
+      "metric": "memory",
+      "process_count": 3,
+      "value": 1720000000.0
+    }
+  ],
+  "metric": "memory"
+}

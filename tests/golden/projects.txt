@@ -1,0 +1,6 @@
+PROJECT         PROCS   MEMORY  PORTS  STATE
+shop                5  1.96 GB  3000   serving
+storefront-web      2   463 MB  4322   idle
+api                 2   185 MB  8000   idle
+
+2 dev servers are running but idle. Stopping them frees 638 MB and ports 4322, 8000.

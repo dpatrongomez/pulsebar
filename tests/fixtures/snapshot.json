@@ -1,0 +1,3296 @@
+{
+ "timestamp": 1793548800000,
+ "hostname": "dev-mac",
+ "machine": {
+  "cpu": {
+   "total_pct": 27.0,
+   "user_pct": 19.0,
+   "system_pct": 8.0,
+   "idle_pct": 73.0,
+   "per_core": [
+    40,
+    35,
+    30,
+    25,
+    20,
+    15,
+    30,
+    22
+   ],
+   "load_avg": [
+    3.41,
+    2.8,
+    2.1
+   ],
+   "core_count": 8
+  },
+  "memory": {
+   "total": 36000000000,
+   "used": 33200000000,
+   "app": 22000000000,
+   "wired": 4200000000,
+   "compressed": 7000000000,
+   "cached": 2100000000,
+   "free": 700000000,
+   "swap_used": 1200000000,
+   "swap_total": 4000000000
+  },
+  "disk": {
+   "read_bps": 1200000,
+   "write_bps": 3400000,
+   "volumes": [
+    {
+     "name": "Macintosh HD",
+     "mount_point": "/",
+     "total": 994000000000,
+     "free": 412000000000,
+     "removable": false
+    }
+   ]
+  },
+  "network": {
+   "rx_bps": 2400000,
+   "tx_bps": 310000,
+   "interfaces": [
+    {
+     "name": "en0",
+     "rx_bps": 2400000,
+     "tx_bps": 310000,
+     "total_rx": 9000000000,
+     "total_tx": 1000000000
+    }
+   ]
+  },
+  "gpu": {
+   "available": true,
+   "name": "Apple M3 Max",
+   "utilization_pct": 12.0,
+   "vram_used": 1500000000,
+   "vram_total": 36000000000,
+   "power_w": 3.1
+  },
+  "neural": {
+   "available": true,
+   "power_w": 0.4,
+   "utilization_pct": 5.0
+  },
+  "sensors": {
+   "cpu_temp_c": 55.0,
+   "gpu_temp_c": 48.0,
+   "fans": [
+    {
+     "index": 0,
+     "rpm": 2100,
+     "min_rpm": 1200,
+     "max_rpm": 6000
+    }
+   ]
+  },
+  "battery": {
+   "present": true,
+   "percent": 80.0,
+   "charging": false,
+   "on_ac": false,
+   "time_remaining_min": 300,
+   "power_w": 12.0,
+   "cycle_count": 123,
+   "health_pct": 90.0,
+   "temperature_c": 30.5
+  },
+  "power": {
+   "system_w": 14.2,
+   "cpu_w": 6.0,
+   "gpu_w": 3.1,
+   "ane_w": 0.4
+  },
+  "audio": {
+   "output_device": "MacBook Pro Speakers",
+   "output_volume": 0.44,
+   "output_muted": false,
+   "input_volume": 0.75,
+   "apps": [
+    {
+     "pid": 500,
+     "app_name": "Google Chrome",
+     "bundle_id": "com.google.Chrome",
+     "state": "playing",
+     "using_mic": false
+    }
+   ]
+  },
+  "bluetooth": {
+   "powered": true,
+   "devices": [
+    {
+     "name": "AirPods Pro",
+     "address": "AA:BB",
+     "kind": "Headphones",
+     "connected": true,
+     "battery_left": 85,
+     "battery_right": 90,
+     "battery_case": 60
+    }
+   ]
+  }
+ },
+ "processes": [
+  {
+   "pid": 500,
+   "ppid": 1,
+   "uid": 501,
+   "name": "Google Chrome",
+   "executable_path": "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+   "argv": [
+    "Google Chrome"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 4.0,
+   "mem_bytes": 1230000000,
+   "energy_w": 2.5,
+   "app_name": "Google Chrome",
+   "app_bundle_id": "com.google.Chrome",
+   "mem_peak": 1230000000
+  },
+  {
+   "pid": 1000,
+   "ppid": 500,
+   "uid": 501,
+   "name": "Google Chrome Helper (Renderer)",
+   "executable_path": "/usr/bin/Google Chrome Helper (Renderer)",
+   "argv": [
+    "Google Chrome Helper (Renderer)"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.2,
+   "mem_bytes": 210526320,
+   "energy_w": 0.05,
+   "app_name": "Google Chrome",
+   "app_bundle_id": "com.google.Chrome",
+   "mem_peak": 210526320
+  },
+  {
+   "pid": 1001,
+   "ppid": 500,
+   "uid": 501,
+   "name": "Google Chrome Helper (Renderer)",
+   "executable_path": "/usr/bin/Google Chrome Helper (Renderer)",
+   "argv": [
+    "Google Chrome Helper (Renderer)"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.2,
+   "mem_bytes": 210526320,
+   "energy_w": 0.05,
+   "app_name": "Google Chrome",
+   "app_bundle_id": "com.google.Chrome",
+   "mem_peak": 210526320
+  },
+  {
+   "pid": 1002,
+   "ppid": 500,
+   "uid": 501,
+   "name": "Google Chrome Helper (Renderer)",
+   "executable_path": "/usr/bin/Google Chrome Helper (Renderer)",
+   "argv": [
+    "Google Chrome Helper (Renderer)"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.2,
+   "mem_bytes": 210526320,
+   "energy_w": 0.05,
+   "app_name": "Google Chrome",
+   "app_bundle_id": "com.google.Chrome",
+   "mem_peak": 210526320
+  },
+  {
+   "pid": 1003,
+   "ppid": 500,
+   "uid": 501,
+   "name": "Google Chrome Helper (Renderer)",
+   "executable_path": "/usr/bin/Google Chrome Helper (Renderer)",
+   "argv": [
+    "Google Chrome Helper (Renderer)"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.2,
+   "mem_bytes": 210526320,
+   "energy_w": 0.05,
+   "app_name": "Google Chrome",
+   "app_bundle_id": "com.google.Chrome",
+   "mem_peak": 210526320
+  },
+  {
+   "pid": 1004,
+   "ppid": 500,
+   "uid": 501,
+   "name": "Google Chrome Helper (Renderer)",
+   "executable_path": "/usr/bin/Google Chrome Helper (Renderer)",
+   "argv": [
+    "Google Chrome Helper (Renderer)"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.2,
+   "mem_bytes": 210526320,
+   "energy_w": 0.05,
+   "app_name": "Google Chrome",
+   "app_bundle_id": "com.google.Chrome",
+   "mem_peak": 210526320
+  },
+  {
+   "pid": 1005,
+   "ppid": 500,
+   "uid": 501,
+   "name": "Google Chrome Helper (Renderer)",
+   "executable_path": "/usr/bin/Google Chrome Helper (Renderer)",
+   "argv": [
+    "Google Chrome Helper (Renderer)"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.2,
+   "mem_bytes": 210526320,
+   "energy_w": 0.05,
+   "app_name": "Google Chrome",
+   "app_bundle_id": "com.google.Chrome",
+   "mem_peak": 210526320
+  },
+  {
+   "pid": 1006,
+   "ppid": 500,
+   "uid": 501,
+   "name": "Google Chrome Helper (Renderer)",
+   "executable_path": "/usr/bin/Google Chrome Helper (Renderer)",
+   "argv": [
+    "Google Chrome Helper (Renderer)"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.2,
+   "mem_bytes": 210526320,
+   "energy_w": 0.05,
+   "app_name": "Google Chrome",
+   "app_bundle_id": "com.google.Chrome",
+   "mem_peak": 210526320
+  },
+  {
+   "pid": 1007,
+   "ppid": 500,
+   "uid": 501,
+   "name": "Google Chrome Helper (Renderer)",
+   "executable_path": "/usr/bin/Google Chrome Helper (Renderer)",
+   "argv": [
+    "Google Chrome Helper (Renderer)"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.2,
+   "mem_bytes": 210526320,
+   "energy_w": 0.05,
+   "app_name": "Google Chrome",
+   "app_bundle_id": "com.google.Chrome",
+   "mem_peak": 210526320
+  },
+  {
+   "pid": 1008,
+   "ppid": 500,
+   "uid": 501,
+   "name": "Google Chrome Helper (Renderer)",
+   "executable_path": "/usr/bin/Google Chrome Helper (Renderer)",
+   "argv": [
+    "Google Chrome Helper (Renderer)"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.2,
+   "mem_bytes": 210526320,
+   "energy_w": 0.05,
+   "app_name": "Google Chrome",
+   "app_bundle_id": "com.google.Chrome",
+   "mem_peak": 210526320
+  },
+  {
+   "pid": 1009,
+   "ppid": 500,
+   "uid": 501,
+   "name": "Google Chrome Helper (Renderer)",
+   "executable_path": "/usr/bin/Google Chrome Helper (Renderer)",
+   "argv": [
+    "Google Chrome Helper (Renderer)"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.2,
+   "mem_bytes": 210526320,
+   "energy_w": 0.05,
+   "app_name": "Google Chrome",
+   "app_bundle_id": "com.google.Chrome",
+   "mem_peak": 210526320
+  },
+  {
+   "pid": 1010,
+   "ppid": 500,
+   "uid": 501,
+   "name": "Google Chrome Helper (Renderer)",
+   "executable_path": "/usr/bin/Google Chrome Helper (Renderer)",
+   "argv": [
+    "Google Chrome Helper (Renderer)"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.2,
+   "mem_bytes": 210526320,
+   "energy_w": 0.05,
+   "app_name": "Google Chrome",
+   "app_bundle_id": "com.google.Chrome",
+   "mem_peak": 210526320
+  },
+  {
+   "pid": 1011,
+   "ppid": 500,
+   "uid": 501,
+   "name": "Google Chrome Helper (Renderer)",
+   "executable_path": "/usr/bin/Google Chrome Helper (Renderer)",
+   "argv": [
+    "Google Chrome Helper (Renderer)"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.2,
+   "mem_bytes": 210526320,
+   "energy_w": 0.05,
+   "app_name": "Google Chrome",
+   "app_bundle_id": "com.google.Chrome",
+   "mem_peak": 210526320
+  },
+  {
+   "pid": 1012,
+   "ppid": 500,
+   "uid": 501,
+   "name": "Google Chrome Helper (Renderer)",
+   "executable_path": "/usr/bin/Google Chrome Helper (Renderer)",
+   "argv": [
+    "Google Chrome Helper (Renderer)"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.2,
+   "mem_bytes": 210526320,
+   "energy_w": 0.05,
+   "app_name": "Google Chrome",
+   "app_bundle_id": "com.google.Chrome",
+   "mem_peak": 210526320
+  },
+  {
+   "pid": 1013,
+   "ppid": 500,
+   "uid": 501,
+   "name": "Google Chrome Helper (Renderer)",
+   "executable_path": "/usr/bin/Google Chrome Helper (Renderer)",
+   "argv": [
+    "Google Chrome Helper (Renderer)"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.2,
+   "mem_bytes": 210526320,
+   "energy_w": 0.05,
+   "app_name": "Google Chrome",
+   "app_bundle_id": "com.google.Chrome",
+   "mem_peak": 210526320
+  },
+  {
+   "pid": 1014,
+   "ppid": 500,
+   "uid": 501,
+   "name": "Google Chrome Helper (Renderer)",
+   "executable_path": "/usr/bin/Google Chrome Helper (Renderer)",
+   "argv": [
+    "Google Chrome Helper (Renderer)"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.2,
+   "mem_bytes": 210526320,
+   "energy_w": 0.05,
+   "app_name": "Google Chrome",
+   "app_bundle_id": "com.google.Chrome",
+   "mem_peak": 210526320
+  },
+  {
+   "pid": 1015,
+   "ppid": 500,
+   "uid": 501,
+   "name": "Google Chrome Helper (Renderer)",
+   "executable_path": "/usr/bin/Google Chrome Helper (Renderer)",
+   "argv": [
+    "Google Chrome Helper (Renderer)"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.2,
+   "mem_bytes": 210526315,
+   "energy_w": 0.05,
+   "app_name": "Google Chrome",
+   "app_bundle_id": "com.google.Chrome",
+   "mem_peak": 210526315
+  },
+  {
+   "pid": 1016,
+   "ppid": 500,
+   "uid": 501,
+   "name": "Google Chrome Helper (Renderer)",
+   "executable_path": "/usr/bin/Google Chrome Helper (Renderer)",
+   "argv": [
+    "Google Chrome Helper (Renderer)"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.2,
+   "mem_bytes": 210526315,
+   "energy_w": 0.05,
+   "app_name": "Google Chrome",
+   "app_bundle_id": "com.google.Chrome",
+   "mem_peak": 210526315
+  },
+  {
+   "pid": 1017,
+   "ppid": 500,
+   "uid": 501,
+   "name": "Google Chrome Helper (Renderer)",
+   "executable_path": "/usr/bin/Google Chrome Helper (Renderer)",
+   "argv": [
+    "Google Chrome Helper (Renderer)"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.2,
+   "mem_bytes": 210526315,
+   "energy_w": 0.05,
+   "app_name": "Google Chrome",
+   "app_bundle_id": "com.google.Chrome",
+   "mem_peak": 210526315
+  },
+  {
+   "pid": 1018,
+   "ppid": 500,
+   "uid": 501,
+   "name": "Google Chrome Helper (Renderer)",
+   "executable_path": "/usr/bin/Google Chrome Helper (Renderer)",
+   "argv": [
+    "Google Chrome Helper (Renderer)"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.2,
+   "mem_bytes": 210526315,
+   "energy_w": 0.05,
+   "app_name": "Google Chrome",
+   "app_bundle_id": "com.google.Chrome",
+   "mem_peak": 210526315
+  },
+  {
+   "pid": 1019,
+   "ppid": 500,
+   "uid": 501,
+   "name": "Google Chrome Helper (Renderer)",
+   "executable_path": "/usr/bin/Google Chrome Helper (Renderer)",
+   "argv": [
+    "Google Chrome Helper (Renderer)"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.2,
+   "mem_bytes": 210526315,
+   "energy_w": 0.05,
+   "app_name": "Google Chrome",
+   "app_bundle_id": "com.google.Chrome",
+   "mem_peak": 210526315
+  },
+  {
+   "pid": 1020,
+   "ppid": 500,
+   "uid": 501,
+   "name": "Google Chrome Helper (Renderer)",
+   "executable_path": "/usr/bin/Google Chrome Helper (Renderer)",
+   "argv": [
+    "Google Chrome Helper (Renderer)"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.2,
+   "mem_bytes": 210526315,
+   "energy_w": 0.05,
+   "app_name": "Google Chrome",
+   "app_bundle_id": "com.google.Chrome",
+   "mem_peak": 210526315
+  },
+  {
+   "pid": 1021,
+   "ppid": 500,
+   "uid": 501,
+   "name": "Google Chrome Helper (Renderer)",
+   "executable_path": "/usr/bin/Google Chrome Helper (Renderer)",
+   "argv": [
+    "Google Chrome Helper (Renderer)"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.2,
+   "mem_bytes": 210526315,
+   "energy_w": 0.05,
+   "app_name": "Google Chrome",
+   "app_bundle_id": "com.google.Chrome",
+   "mem_peak": 210526315
+  },
+  {
+   "pid": 1022,
+   "ppid": 500,
+   "uid": 501,
+   "name": "Google Chrome Helper (Renderer)",
+   "executable_path": "/usr/bin/Google Chrome Helper (Renderer)",
+   "argv": [
+    "Google Chrome Helper (Renderer)"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.2,
+   "mem_bytes": 210526315,
+   "energy_w": 0.05,
+   "app_name": "Google Chrome",
+   "app_bundle_id": "com.google.Chrome",
+   "mem_peak": 210526315
+  },
+  {
+   "pid": 1023,
+   "ppid": 500,
+   "uid": 501,
+   "name": "Google Chrome Helper (Renderer)",
+   "executable_path": "/usr/bin/Google Chrome Helper (Renderer)",
+   "argv": [
+    "Google Chrome Helper (Renderer)"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.2,
+   "mem_bytes": 210526315,
+   "energy_w": 0.05,
+   "app_name": "Google Chrome",
+   "app_bundle_id": "com.google.Chrome",
+   "mem_peak": 210526315
+  },
+  {
+   "pid": 1024,
+   "ppid": 500,
+   "uid": 501,
+   "name": "Google Chrome Helper (Renderer)",
+   "executable_path": "/usr/bin/Google Chrome Helper (Renderer)",
+   "argv": [
+    "Google Chrome Helper (Renderer)"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.2,
+   "mem_bytes": 210526315,
+   "energy_w": 0.05,
+   "app_name": "Google Chrome",
+   "app_bundle_id": "com.google.Chrome",
+   "mem_peak": 210526315
+  },
+  {
+   "pid": 1025,
+   "ppid": 500,
+   "uid": 501,
+   "name": "Google Chrome Helper (Renderer)",
+   "executable_path": "/usr/bin/Google Chrome Helper (Renderer)",
+   "argv": [
+    "Google Chrome Helper (Renderer)"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.2,
+   "mem_bytes": 210526315,
+   "energy_w": 0.05,
+   "app_name": "Google Chrome",
+   "app_bundle_id": "com.google.Chrome",
+   "mem_peak": 210526315
+  },
+  {
+   "pid": 1026,
+   "ppid": 500,
+   "uid": 501,
+   "name": "Google Chrome Helper (Renderer)",
+   "executable_path": "/usr/bin/Google Chrome Helper (Renderer)",
+   "argv": [
+    "Google Chrome Helper (Renderer)"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.2,
+   "mem_bytes": 210526315,
+   "energy_w": 0.05,
+   "app_name": "Google Chrome",
+   "app_bundle_id": "com.google.Chrome",
+   "mem_peak": 210526315
+  },
+  {
+   "pid": 1027,
+   "ppid": 500,
+   "uid": 501,
+   "name": "Google Chrome Helper (Renderer)",
+   "executable_path": "/usr/bin/Google Chrome Helper (Renderer)",
+   "argv": [
+    "Google Chrome Helper (Renderer)"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.2,
+   "mem_bytes": 210526315,
+   "energy_w": 0.05,
+   "app_name": "Google Chrome",
+   "app_bundle_id": "com.google.Chrome",
+   "mem_peak": 210526315
+  },
+  {
+   "pid": 1028,
+   "ppid": 500,
+   "uid": 501,
+   "name": "Google Chrome Helper (Renderer)",
+   "executable_path": "/usr/bin/Google Chrome Helper (Renderer)",
+   "argv": [
+    "Google Chrome Helper (Renderer)"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.2,
+   "mem_bytes": 210526315,
+   "energy_w": 0.05,
+   "app_name": "Google Chrome",
+   "app_bundle_id": "com.google.Chrome",
+   "mem_peak": 210526315
+  },
+  {
+   "pid": 1029,
+   "ppid": 500,
+   "uid": 501,
+   "name": "Google Chrome Helper (Renderer)",
+   "executable_path": "/usr/bin/Google Chrome Helper (Renderer)",
+   "argv": [
+    "Google Chrome Helper (Renderer)"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.2,
+   "mem_bytes": 210526315,
+   "energy_w": 0.05,
+   "app_name": "Google Chrome",
+   "app_bundle_id": "com.google.Chrome",
+   "mem_peak": 210526315
+  },
+  {
+   "pid": 1030,
+   "ppid": 500,
+   "uid": 501,
+   "name": "Google Chrome Helper (Renderer)",
+   "executable_path": "/usr/bin/Google Chrome Helper (Renderer)",
+   "argv": [
+    "Google Chrome Helper (Renderer)"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.2,
+   "mem_bytes": 210526315,
+   "energy_w": 0.05,
+   "app_name": "Google Chrome",
+   "app_bundle_id": "com.google.Chrome",
+   "mem_peak": 210526315
+  },
+  {
+   "pid": 1031,
+   "ppid": 500,
+   "uid": 501,
+   "name": "Google Chrome Helper (Renderer)",
+   "executable_path": "/usr/bin/Google Chrome Helper (Renderer)",
+   "argv": [
+    "Google Chrome Helper (Renderer)"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.2,
+   "mem_bytes": 210526315,
+   "energy_w": 0.05,
+   "app_name": "Google Chrome",
+   "app_bundle_id": "com.google.Chrome",
+   "mem_peak": 210526315
+  },
+  {
+   "pid": 1032,
+   "ppid": 500,
+   "uid": 501,
+   "name": "Google Chrome Helper (Renderer)",
+   "executable_path": "/usr/bin/Google Chrome Helper (Renderer)",
+   "argv": [
+    "Google Chrome Helper (Renderer)"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.2,
+   "mem_bytes": 210526315,
+   "energy_w": 0.05,
+   "app_name": "Google Chrome",
+   "app_bundle_id": "com.google.Chrome",
+   "mem_peak": 210526315
+  },
+  {
+   "pid": 1033,
+   "ppid": 500,
+   "uid": 501,
+   "name": "Google Chrome Helper (Renderer)",
+   "executable_path": "/usr/bin/Google Chrome Helper (Renderer)",
+   "argv": [
+    "Google Chrome Helper (Renderer)"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.2,
+   "mem_bytes": 210526315,
+   "energy_w": 0.05,
+   "app_name": "Google Chrome",
+   "app_bundle_id": "com.google.Chrome",
+   "mem_peak": 210526315
+  },
+  {
+   "pid": 1034,
+   "ppid": 500,
+   "uid": 501,
+   "name": "Google Chrome Helper (Renderer)",
+   "executable_path": "/usr/bin/Google Chrome Helper (Renderer)",
+   "argv": [
+    "Google Chrome Helper (Renderer)"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.2,
+   "mem_bytes": 210526315,
+   "energy_w": 0.05,
+   "app_name": "Google Chrome",
+   "app_bundle_id": "com.google.Chrome",
+   "mem_peak": 210526315
+  },
+  {
+   "pid": 1035,
+   "ppid": 500,
+   "uid": 501,
+   "name": "Google Chrome Helper (Renderer)",
+   "executable_path": "/usr/bin/Google Chrome Helper (Renderer)",
+   "argv": [
+    "Google Chrome Helper (Renderer)"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.2,
+   "mem_bytes": 210526315,
+   "energy_w": 0.05,
+   "app_name": "Google Chrome",
+   "app_bundle_id": "com.google.Chrome",
+   "mem_peak": 210526315
+  },
+  {
+   "pid": 1036,
+   "ppid": 500,
+   "uid": 501,
+   "name": "Google Chrome Helper (Renderer)",
+   "executable_path": "/usr/bin/Google Chrome Helper (Renderer)",
+   "argv": [
+    "Google Chrome Helper (Renderer)"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.2,
+   "mem_bytes": 210526315,
+   "energy_w": 0.05,
+   "app_name": "Google Chrome",
+   "app_bundle_id": "com.google.Chrome",
+   "mem_peak": 210526315
+  },
+  {
+   "pid": 1037,
+   "ppid": 500,
+   "uid": 501,
+   "name": "Google Chrome Helper (Renderer)",
+   "executable_path": "/usr/bin/Google Chrome Helper (Renderer)",
+   "argv": [
+    "Google Chrome Helper (Renderer)"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.2,
+   "mem_bytes": 210526315,
+   "energy_w": 0.05,
+   "app_name": "Google Chrome",
+   "app_bundle_id": "com.google.Chrome",
+   "mem_peak": 210526315
+  },
+  {
+   "pid": 1038,
+   "ppid": 500,
+   "uid": 501,
+   "name": "Google Chrome Helper (Renderer)",
+   "executable_path": "/usr/bin/Google Chrome Helper (Renderer)",
+   "argv": [
+    "Google Chrome Helper (Renderer)"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.2,
+   "mem_bytes": 210526315,
+   "energy_w": 0.05,
+   "app_name": "Google Chrome",
+   "app_bundle_id": "com.google.Chrome",
+   "mem_peak": 210526315
+  },
+  {
+   "pid": 1039,
+   "ppid": 500,
+   "uid": 501,
+   "name": "Google Chrome Helper (Renderer)",
+   "executable_path": "/usr/bin/Google Chrome Helper (Renderer)",
+   "argv": [
+    "Google Chrome Helper (Renderer)"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.2,
+   "mem_bytes": 210526315,
+   "energy_w": 0.05,
+   "app_name": "Google Chrome",
+   "app_bundle_id": "com.google.Chrome",
+   "mem_peak": 210526315
+  },
+  {
+   "pid": 1040,
+   "ppid": 500,
+   "uid": 501,
+   "name": "Google Chrome Helper (Renderer)",
+   "executable_path": "/usr/bin/Google Chrome Helper (Renderer)",
+   "argv": [
+    "Google Chrome Helper (Renderer)"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.2,
+   "mem_bytes": 210526315,
+   "energy_w": 0.05,
+   "app_name": "Google Chrome",
+   "app_bundle_id": "com.google.Chrome",
+   "mem_peak": 210526315
+  },
+  {
+   "pid": 1041,
+   "ppid": 500,
+   "uid": 501,
+   "name": "Google Chrome Helper (Renderer)",
+   "executable_path": "/usr/bin/Google Chrome Helper (Renderer)",
+   "argv": [
+    "Google Chrome Helper (Renderer)"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.2,
+   "mem_bytes": 210526315,
+   "energy_w": 0.05,
+   "app_name": "Google Chrome",
+   "app_bundle_id": "com.google.Chrome",
+   "mem_peak": 210526315
+  },
+  {
+   "pid": 1042,
+   "ppid": 500,
+   "uid": 501,
+   "name": "Google Chrome Helper (Renderer)",
+   "executable_path": "/usr/bin/Google Chrome Helper (Renderer)",
+   "argv": [
+    "Google Chrome Helper (Renderer)"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.2,
+   "mem_bytes": 210526315,
+   "energy_w": 0.05,
+   "app_name": "Google Chrome",
+   "app_bundle_id": "com.google.Chrome",
+   "mem_peak": 210526315
+  },
+  {
+   "pid": 1043,
+   "ppid": 500,
+   "uid": 501,
+   "name": "Google Chrome Helper (Renderer)",
+   "executable_path": "/usr/bin/Google Chrome Helper (Renderer)",
+   "argv": [
+    "Google Chrome Helper (Renderer)"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.2,
+   "mem_bytes": 210526315,
+   "energy_w": 0.05,
+   "app_name": "Google Chrome",
+   "app_bundle_id": "com.google.Chrome",
+   "mem_peak": 210526315
+  },
+  {
+   "pid": 1044,
+   "ppid": 500,
+   "uid": 501,
+   "name": "Google Chrome Helper (Renderer)",
+   "executable_path": "/usr/bin/Google Chrome Helper (Renderer)",
+   "argv": [
+    "Google Chrome Helper (Renderer)"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.2,
+   "mem_bytes": 210526315,
+   "energy_w": 0.05,
+   "app_name": "Google Chrome",
+   "app_bundle_id": "com.google.Chrome",
+   "mem_peak": 210526315
+  },
+  {
+   "pid": 1045,
+   "ppid": 500,
+   "uid": 501,
+   "name": "Google Chrome Helper (Renderer)",
+   "executable_path": "/usr/bin/Google Chrome Helper (Renderer)",
+   "argv": [
+    "Google Chrome Helper (Renderer)"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.2,
+   "mem_bytes": 210526315,
+   "energy_w": 0.05,
+   "app_name": "Google Chrome",
+   "app_bundle_id": "com.google.Chrome",
+   "mem_peak": 210526315
+  },
+  {
+   "pid": 1046,
+   "ppid": 500,
+   "uid": 501,
+   "name": "Google Chrome Helper (Renderer)",
+   "executable_path": "/usr/bin/Google Chrome Helper (Renderer)",
+   "argv": [
+    "Google Chrome Helper (Renderer)"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.2,
+   "mem_bytes": 210526315,
+   "energy_w": 0.05,
+   "app_name": "Google Chrome",
+   "app_bundle_id": "com.google.Chrome",
+   "mem_peak": 210526315
+  },
+  {
+   "pid": 1047,
+   "ppid": 500,
+   "uid": 501,
+   "name": "Google Chrome Helper (Renderer)",
+   "executable_path": "/usr/bin/Google Chrome Helper (Renderer)",
+   "argv": [
+    "Google Chrome Helper (Renderer)"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.2,
+   "mem_bytes": 210526315,
+   "energy_w": 0.05,
+   "app_name": "Google Chrome",
+   "app_bundle_id": "com.google.Chrome",
+   "mem_peak": 210526315
+  },
+  {
+   "pid": 1048,
+   "ppid": 500,
+   "uid": 501,
+   "name": "Google Chrome Helper (Renderer)",
+   "executable_path": "/usr/bin/Google Chrome Helper (Renderer)",
+   "argv": [
+    "Google Chrome Helper (Renderer)"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.2,
+   "mem_bytes": 210526315,
+   "energy_w": 0.05,
+   "app_name": "Google Chrome",
+   "app_bundle_id": "com.google.Chrome",
+   "mem_peak": 210526315
+  },
+  {
+   "pid": 1049,
+   "ppid": 500,
+   "uid": 501,
+   "name": "Google Chrome Helper (Renderer)",
+   "executable_path": "/usr/bin/Google Chrome Helper (Renderer)",
+   "argv": [
+    "Google Chrome Helper (Renderer)"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.2,
+   "mem_bytes": 210526315,
+   "energy_w": 0.05,
+   "app_name": "Google Chrome",
+   "app_bundle_id": "com.google.Chrome",
+   "mem_peak": 210526315
+  },
+  {
+   "pid": 1050,
+   "ppid": 500,
+   "uid": 501,
+   "name": "Google Chrome Helper (Renderer)",
+   "executable_path": "/usr/bin/Google Chrome Helper (Renderer)",
+   "argv": [
+    "Google Chrome Helper (Renderer)"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.2,
+   "mem_bytes": 210526315,
+   "energy_w": 0.05,
+   "app_name": "Google Chrome",
+   "app_bundle_id": "com.google.Chrome",
+   "mem_peak": 210526315
+  },
+  {
+   "pid": 1051,
+   "ppid": 500,
+   "uid": 501,
+   "name": "Google Chrome Helper (Renderer)",
+   "executable_path": "/usr/bin/Google Chrome Helper (Renderer)",
+   "argv": [
+    "Google Chrome Helper (Renderer)"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.2,
+   "mem_bytes": 210526315,
+   "energy_w": 0.05,
+   "app_name": "Google Chrome",
+   "app_bundle_id": "com.google.Chrome",
+   "mem_peak": 210526315
+  },
+  {
+   "pid": 1052,
+   "ppid": 500,
+   "uid": 501,
+   "name": "Google Chrome Helper (Renderer)",
+   "executable_path": "/usr/bin/Google Chrome Helper (Renderer)",
+   "argv": [
+    "Google Chrome Helper (Renderer)"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.2,
+   "mem_bytes": 210526315,
+   "energy_w": 0.05,
+   "app_name": "Google Chrome",
+   "app_bundle_id": "com.google.Chrome",
+   "mem_peak": 210526315
+  },
+  {
+   "pid": 1053,
+   "ppid": 500,
+   "uid": 501,
+   "name": "Google Chrome Helper (Renderer)",
+   "executable_path": "/usr/bin/Google Chrome Helper (Renderer)",
+   "argv": [
+    "Google Chrome Helper (Renderer)"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.2,
+   "mem_bytes": 210526315,
+   "energy_w": 0.05,
+   "app_name": "Google Chrome",
+   "app_bundle_id": "com.google.Chrome",
+   "mem_peak": 210526315
+  },
+  {
+   "pid": 1054,
+   "ppid": 500,
+   "uid": 501,
+   "name": "Google Chrome Helper (Renderer)",
+   "executable_path": "/usr/bin/Google Chrome Helper (Renderer)",
+   "argv": [
+    "Google Chrome Helper (Renderer)"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.2,
+   "mem_bytes": 210526315,
+   "energy_w": 0.05,
+   "app_name": "Google Chrome",
+   "app_bundle_id": "com.google.Chrome",
+   "mem_peak": 210526315
+  },
+  {
+   "pid": 1055,
+   "ppid": 500,
+   "uid": 501,
+   "name": "Google Chrome Helper (Renderer)",
+   "executable_path": "/usr/bin/Google Chrome Helper (Renderer)",
+   "argv": [
+    "Google Chrome Helper (Renderer)"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.2,
+   "mem_bytes": 210526315,
+   "energy_w": 0.05,
+   "app_name": "Google Chrome",
+   "app_bundle_id": "com.google.Chrome",
+   "mem_peak": 210526315
+  },
+  {
+   "pid": 1056,
+   "ppid": 500,
+   "uid": 501,
+   "name": "Google Chrome Helper (Renderer)",
+   "executable_path": "/usr/bin/Google Chrome Helper (Renderer)",
+   "argv": [
+    "Google Chrome Helper (Renderer)"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.2,
+   "mem_bytes": 210526315,
+   "energy_w": 0.05,
+   "app_name": "Google Chrome",
+   "app_bundle_id": "com.google.Chrome",
+   "mem_peak": 210526315
+  },
+  {
+   "pid": 1057,
+   "ppid": 500,
+   "uid": 501,
+   "name": "Google Chrome Helper (Renderer)",
+   "executable_path": "/usr/bin/Google Chrome Helper (Renderer)",
+   "argv": [
+    "Google Chrome Helper (Renderer)"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.2,
+   "mem_bytes": 210526315,
+   "energy_w": 0.05,
+   "app_name": "Google Chrome",
+   "app_bundle_id": "com.google.Chrome",
+   "mem_peak": 210526315
+  },
+  {
+   "pid": 1058,
+   "ppid": 500,
+   "uid": 501,
+   "name": "Google Chrome Helper (Renderer)",
+   "executable_path": "/usr/bin/Google Chrome Helper (Renderer)",
+   "argv": [
+    "Google Chrome Helper (Renderer)"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.2,
+   "mem_bytes": 210526315,
+   "energy_w": 0.05,
+   "app_name": "Google Chrome",
+   "app_bundle_id": "com.google.Chrome",
+   "mem_peak": 210526315
+  },
+  {
+   "pid": 1059,
+   "ppid": 500,
+   "uid": 501,
+   "name": "Google Chrome Helper (Renderer)",
+   "executable_path": "/usr/bin/Google Chrome Helper (Renderer)",
+   "argv": [
+    "Google Chrome Helper (Renderer)"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.2,
+   "mem_bytes": 210526315,
+   "energy_w": 0.05,
+   "app_name": "Google Chrome",
+   "app_bundle_id": "com.google.Chrome",
+   "mem_peak": 210526315
+  },
+  {
+   "pid": 1060,
+   "ppid": 500,
+   "uid": 501,
+   "name": "Google Chrome Helper (Renderer)",
+   "executable_path": "/usr/bin/Google Chrome Helper (Renderer)",
+   "argv": [
+    "Google Chrome Helper (Renderer)"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.2,
+   "mem_bytes": 210526315,
+   "energy_w": 0.05,
+   "app_name": "Google Chrome",
+   "app_bundle_id": "com.google.Chrome",
+   "mem_peak": 210526315
+  },
+  {
+   "pid": 1061,
+   "ppid": 500,
+   "uid": 501,
+   "name": "Google Chrome Helper (Renderer)",
+   "executable_path": "/usr/bin/Google Chrome Helper (Renderer)",
+   "argv": [
+    "Google Chrome Helper (Renderer)"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.2,
+   "mem_bytes": 210526315,
+   "energy_w": 0.05,
+   "app_name": "Google Chrome",
+   "app_bundle_id": "com.google.Chrome",
+   "mem_peak": 210526315
+  },
+  {
+   "pid": 1062,
+   "ppid": 500,
+   "uid": 501,
+   "name": "Google Chrome Helper (Renderer)",
+   "executable_path": "/usr/bin/Google Chrome Helper (Renderer)",
+   "argv": [
+    "Google Chrome Helper (Renderer)"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.2,
+   "mem_bytes": 210526315,
+   "energy_w": 0.05,
+   "app_name": "Google Chrome",
+   "app_bundle_id": "com.google.Chrome",
+   "mem_peak": 210526315
+  },
+  {
+   "pid": 1063,
+   "ppid": 500,
+   "uid": 501,
+   "name": "Google Chrome Helper (Renderer)",
+   "executable_path": "/usr/bin/Google Chrome Helper (Renderer)",
+   "argv": [
+    "Google Chrome Helper (Renderer)"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.2,
+   "mem_bytes": 210526315,
+   "energy_w": 0.05,
+   "app_name": "Google Chrome",
+   "app_bundle_id": "com.google.Chrome",
+   "mem_peak": 210526315
+  },
+  {
+   "pid": 1064,
+   "ppid": 500,
+   "uid": 501,
+   "name": "Google Chrome Helper (Renderer)",
+   "executable_path": "/usr/bin/Google Chrome Helper (Renderer)",
+   "argv": [
+    "Google Chrome Helper (Renderer)"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.2,
+   "mem_bytes": 210526315,
+   "energy_w": 0.05,
+   "app_name": "Google Chrome",
+   "app_bundle_id": "com.google.Chrome",
+   "mem_peak": 210526315
+  },
+  {
+   "pid": 1065,
+   "ppid": 500,
+   "uid": 501,
+   "name": "Google Chrome Helper (Renderer)",
+   "executable_path": "/usr/bin/Google Chrome Helper (Renderer)",
+   "argv": [
+    "Google Chrome Helper (Renderer)"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.2,
+   "mem_bytes": 210526315,
+   "energy_w": 0.05,
+   "app_name": "Google Chrome",
+   "app_bundle_id": "com.google.Chrome",
+   "mem_peak": 210526315
+  },
+  {
+   "pid": 1066,
+   "ppid": 500,
+   "uid": 501,
+   "name": "Google Chrome Helper (Renderer)",
+   "executable_path": "/usr/bin/Google Chrome Helper (Renderer)",
+   "argv": [
+    "Google Chrome Helper (Renderer)"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.2,
+   "mem_bytes": 210526315,
+   "energy_w": 0.05,
+   "app_name": "Google Chrome",
+   "app_bundle_id": "com.google.Chrome",
+   "mem_peak": 210526315
+  },
+  {
+   "pid": 1067,
+   "ppid": 500,
+   "uid": 501,
+   "name": "Google Chrome Helper (Renderer)",
+   "executable_path": "/usr/bin/Google Chrome Helper (Renderer)",
+   "argv": [
+    "Google Chrome Helper (Renderer)"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.2,
+   "mem_bytes": 210526315,
+   "energy_w": 0.05,
+   "app_name": "Google Chrome",
+   "app_bundle_id": "com.google.Chrome",
+   "mem_peak": 210526315
+  },
+  {
+   "pid": 1068,
+   "ppid": 500,
+   "uid": 501,
+   "name": "Google Chrome Helper (Renderer)",
+   "executable_path": "/usr/bin/Google Chrome Helper (Renderer)",
+   "argv": [
+    "Google Chrome Helper (Renderer)"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.2,
+   "mem_bytes": 210526315,
+   "energy_w": 0.05,
+   "app_name": "Google Chrome",
+   "app_bundle_id": "com.google.Chrome",
+   "mem_peak": 210526315
+  },
+  {
+   "pid": 1069,
+   "ppid": 500,
+   "uid": 501,
+   "name": "Google Chrome Helper (Renderer)",
+   "executable_path": "/usr/bin/Google Chrome Helper (Renderer)",
+   "argv": [
+    "Google Chrome Helper (Renderer)"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.2,
+   "mem_bytes": 210526315,
+   "energy_w": 0.05,
+   "app_name": "Google Chrome",
+   "app_bundle_id": "com.google.Chrome",
+   "mem_peak": 210526315
+  },
+  {
+   "pid": 1070,
+   "ppid": 500,
+   "uid": 501,
+   "name": "Google Chrome Helper (Renderer)",
+   "executable_path": "/usr/bin/Google Chrome Helper (Renderer)",
+   "argv": [
+    "Google Chrome Helper (Renderer)"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.2,
+   "mem_bytes": 210526315,
+   "energy_w": 0.05,
+   "app_name": "Google Chrome",
+   "app_bundle_id": "com.google.Chrome",
+   "mem_peak": 210526315
+  },
+  {
+   "pid": 1071,
+   "ppid": 500,
+   "uid": 501,
+   "name": "Google Chrome Helper (Renderer)",
+   "executable_path": "/usr/bin/Google Chrome Helper (Renderer)",
+   "argv": [
+    "Google Chrome Helper (Renderer)"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.2,
+   "mem_bytes": 210526315,
+   "energy_w": 0.05,
+   "app_name": "Google Chrome",
+   "app_bundle_id": "com.google.Chrome",
+   "mem_peak": 210526315
+  },
+  {
+   "pid": 1072,
+   "ppid": 500,
+   "uid": 501,
+   "name": "Google Chrome Helper (Renderer)",
+   "executable_path": "/usr/bin/Google Chrome Helper (Renderer)",
+   "argv": [
+    "Google Chrome Helper (Renderer)"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.2,
+   "mem_bytes": 210526315,
+   "energy_w": 0.05,
+   "app_name": "Google Chrome",
+   "app_bundle_id": "com.google.Chrome",
+   "mem_peak": 210526315
+  },
+  {
+   "pid": 1073,
+   "ppid": 500,
+   "uid": 501,
+   "name": "Google Chrome Helper (Renderer)",
+   "executable_path": "/usr/bin/Google Chrome Helper (Renderer)",
+   "argv": [
+    "Google Chrome Helper (Renderer)"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.2,
+   "mem_bytes": 210526315,
+   "energy_w": 0.05,
+   "app_name": "Google Chrome",
+   "app_bundle_id": "com.google.Chrome",
+   "mem_peak": 210526315
+  },
+  {
+   "pid": 1074,
+   "ppid": 500,
+   "uid": 501,
+   "name": "Google Chrome Helper (Renderer)",
+   "executable_path": "/usr/bin/Google Chrome Helper (Renderer)",
+   "argv": [
+    "Google Chrome Helper (Renderer)"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.2,
+   "mem_bytes": 210526315,
+   "energy_w": 0.05,
+   "app_name": "Google Chrome",
+   "app_bundle_id": "com.google.Chrome",
+   "mem_peak": 210526315
+  },
+  {
+   "pid": 1075,
+   "ppid": 500,
+   "uid": 501,
+   "name": "Google Chrome Helper (Renderer)",
+   "executable_path": "/usr/bin/Google Chrome Helper (Renderer)",
+   "argv": [
+    "Google Chrome Helper (Renderer)"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.2,
+   "mem_bytes": 210526315,
+   "energy_w": 0.05,
+   "app_name": "Google Chrome",
+   "app_bundle_id": "com.google.Chrome",
+   "mem_peak": 210526315
+  },
+  {
+   "pid": 1076,
+   "ppid": 500,
+   "uid": 501,
+   "name": "Google Chrome Helper (Renderer)",
+   "executable_path": "/usr/bin/Google Chrome Helper (Renderer)",
+   "argv": [
+    "Google Chrome Helper (Renderer)"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.2,
+   "mem_bytes": 210526315,
+   "energy_w": 0.05,
+   "app_name": "Google Chrome",
+   "app_bundle_id": "com.google.Chrome",
+   "mem_peak": 210526315
+  },
+  {
+   "pid": 1077,
+   "ppid": 500,
+   "uid": 501,
+   "name": "Google Chrome Helper (Renderer)",
+   "executable_path": "/usr/bin/Google Chrome Helper (Renderer)",
+   "argv": [
+    "Google Chrome Helper (Renderer)"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.2,
+   "mem_bytes": 210526315,
+   "energy_w": 0.05,
+   "app_name": "Google Chrome",
+   "app_bundle_id": "com.google.Chrome",
+   "mem_peak": 210526315
+  },
+  {
+   "pid": 1078,
+   "ppid": 500,
+   "uid": 501,
+   "name": "Google Chrome Helper (Renderer)",
+   "executable_path": "/usr/bin/Google Chrome Helper (Renderer)",
+   "argv": [
+    "Google Chrome Helper (Renderer)"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.2,
+   "mem_bytes": 210526315,
+   "energy_w": 0.05,
+   "app_name": "Google Chrome",
+   "app_bundle_id": "com.google.Chrome",
+   "mem_peak": 210526315
+  },
+  {
+   "pid": 1079,
+   "ppid": 500,
+   "uid": 501,
+   "name": "Google Chrome Helper (Renderer)",
+   "executable_path": "/usr/bin/Google Chrome Helper (Renderer)",
+   "argv": [
+    "Google Chrome Helper (Renderer)"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.2,
+   "mem_bytes": 210526315,
+   "energy_w": 0.05,
+   "app_name": "Google Chrome",
+   "app_bundle_id": "com.google.Chrome",
+   "mem_peak": 210526315
+  },
+  {
+   "pid": 1080,
+   "ppid": 500,
+   "uid": 501,
+   "name": "Google Chrome Helper (Renderer)",
+   "executable_path": "/usr/bin/Google Chrome Helper (Renderer)",
+   "argv": [
+    "Google Chrome Helper (Renderer)"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.2,
+   "mem_bytes": 210526315,
+   "energy_w": 0.05,
+   "app_name": "Google Chrome",
+   "app_bundle_id": "com.google.Chrome",
+   "mem_peak": 210526315
+  },
+  {
+   "pid": 1081,
+   "ppid": 500,
+   "uid": 501,
+   "name": "Google Chrome Helper (Renderer)",
+   "executable_path": "/usr/bin/Google Chrome Helper (Renderer)",
+   "argv": [
+    "Google Chrome Helper (Renderer)"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.2,
+   "mem_bytes": 210526315,
+   "energy_w": 0.05,
+   "app_name": "Google Chrome",
+   "app_bundle_id": "com.google.Chrome",
+   "mem_peak": 210526315
+  },
+  {
+   "pid": 1082,
+   "ppid": 500,
+   "uid": 501,
+   "name": "Google Chrome Helper (Renderer)",
+   "executable_path": "/usr/bin/Google Chrome Helper (Renderer)",
+   "argv": [
+    "Google Chrome Helper (Renderer)"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.2,
+   "mem_bytes": 210526315,
+   "energy_w": 0.05,
+   "app_name": "Google Chrome",
+   "app_bundle_id": "com.google.Chrome",
+   "mem_peak": 210526315
+  },
+  {
+   "pid": 1083,
+   "ppid": 500,
+   "uid": 501,
+   "name": "Google Chrome Helper (Renderer)",
+   "executable_path": "/usr/bin/Google Chrome Helper (Renderer)",
+   "argv": [
+    "Google Chrome Helper (Renderer)"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.2,
+   "mem_bytes": 210526315,
+   "energy_w": 0.05,
+   "app_name": "Google Chrome",
+   "app_bundle_id": "com.google.Chrome",
+   "mem_peak": 210526315
+  },
+  {
+   "pid": 1084,
+   "ppid": 500,
+   "uid": 501,
+   "name": "Google Chrome Helper (Renderer)",
+   "executable_path": "/usr/bin/Google Chrome Helper (Renderer)",
+   "argv": [
+    "Google Chrome Helper (Renderer)"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.2,
+   "mem_bytes": 210526315,
+   "energy_w": 0.05,
+   "app_name": "Google Chrome",
+   "app_bundle_id": "com.google.Chrome",
+   "mem_peak": 210526315
+  },
+  {
+   "pid": 1085,
+   "ppid": 500,
+   "uid": 501,
+   "name": "Google Chrome Helper (Renderer)",
+   "executable_path": "/usr/bin/Google Chrome Helper (Renderer)",
+   "argv": [
+    "Google Chrome Helper (Renderer)"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.2,
+   "mem_bytes": 210526315,
+   "energy_w": 0.05,
+   "app_name": "Google Chrome",
+   "app_bundle_id": "com.google.Chrome",
+   "mem_peak": 210526315
+  },
+  {
+   "pid": 1086,
+   "ppid": 500,
+   "uid": 501,
+   "name": "Google Chrome Helper (Renderer)",
+   "executable_path": "/usr/bin/Google Chrome Helper (Renderer)",
+   "argv": [
+    "Google Chrome Helper (Renderer)"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.2,
+   "mem_bytes": 210526315,
+   "energy_w": 0.05,
+   "app_name": "Google Chrome",
+   "app_bundle_id": "com.google.Chrome",
+   "mem_peak": 210526315
+  },
+  {
+   "pid": 1087,
+   "ppid": 500,
+   "uid": 501,
+   "name": "Google Chrome Helper (Renderer)",
+   "executable_path": "/usr/bin/Google Chrome Helper (Renderer)",
+   "argv": [
+    "Google Chrome Helper (Renderer)"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.2,
+   "mem_bytes": 210526315,
+   "energy_w": 0.05,
+   "app_name": "Google Chrome",
+   "app_bundle_id": "com.google.Chrome",
+   "mem_peak": 210526315
+  },
+  {
+   "pid": 1088,
+   "ppid": 500,
+   "uid": 501,
+   "name": "Google Chrome Helper (Renderer)",
+   "executable_path": "/usr/bin/Google Chrome Helper (Renderer)",
+   "argv": [
+    "Google Chrome Helper (Renderer)"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.2,
+   "mem_bytes": 210526315,
+   "energy_w": 0.05,
+   "app_name": "Google Chrome",
+   "app_bundle_id": "com.google.Chrome",
+   "mem_peak": 210526315
+  },
+  {
+   "pid": 1089,
+   "ppid": 500,
+   "uid": 501,
+   "name": "Google Chrome Helper (Renderer)",
+   "executable_path": "/usr/bin/Google Chrome Helper (Renderer)",
+   "argv": [
+    "Google Chrome Helper (Renderer)"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.2,
+   "mem_bytes": 210526315,
+   "energy_w": 0.05,
+   "app_name": "Google Chrome",
+   "app_bundle_id": "com.google.Chrome",
+   "mem_peak": 210526315
+  },
+  {
+   "pid": 1090,
+   "ppid": 500,
+   "uid": 501,
+   "name": "Google Chrome Helper (Renderer)",
+   "executable_path": "/usr/bin/Google Chrome Helper (Renderer)",
+   "argv": [
+    "Google Chrome Helper (Renderer)"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.2,
+   "mem_bytes": 210526315,
+   "energy_w": 0.05,
+   "app_name": "Google Chrome",
+   "app_bundle_id": "com.google.Chrome",
+   "mem_peak": 210526315
+  },
+  {
+   "pid": 1091,
+   "ppid": 500,
+   "uid": 501,
+   "name": "Google Chrome Helper (Renderer)",
+   "executable_path": "/usr/bin/Google Chrome Helper (Renderer)",
+   "argv": [
+    "Google Chrome Helper (Renderer)"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.2,
+   "mem_bytes": 210526315,
+   "energy_w": 0.05,
+   "app_name": "Google Chrome",
+   "app_bundle_id": "com.google.Chrome",
+   "mem_peak": 210526315
+  },
+  {
+   "pid": 1092,
+   "ppid": 500,
+   "uid": 501,
+   "name": "Google Chrome Helper (Renderer)",
+   "executable_path": "/usr/bin/Google Chrome Helper (Renderer)",
+   "argv": [
+    "Google Chrome Helper (Renderer)"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.2,
+   "mem_bytes": 210526315,
+   "energy_w": 0.05,
+   "app_name": "Google Chrome",
+   "app_bundle_id": "com.google.Chrome",
+   "mem_peak": 210526315
+  },
+  {
+   "pid": 1093,
+   "ppid": 500,
+   "uid": 501,
+   "name": "Google Chrome Helper (Renderer)",
+   "executable_path": "/usr/bin/Google Chrome Helper (Renderer)",
+   "argv": [
+    "Google Chrome Helper (Renderer)"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.2,
+   "mem_bytes": 210526315,
+   "energy_w": 0.05,
+   "app_name": "Google Chrome",
+   "app_bundle_id": "com.google.Chrome",
+   "mem_peak": 210526315
+  },
+  {
+   "pid": 1094,
+   "ppid": 500,
+   "uid": 501,
+   "name": "Google Chrome Helper (Renderer)",
+   "executable_path": "/usr/bin/Google Chrome Helper (Renderer)",
+   "argv": [
+    "Google Chrome Helper (Renderer)"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.2,
+   "mem_bytes": 210526315,
+   "energy_w": 0.05,
+   "app_name": "Google Chrome",
+   "app_bundle_id": "com.google.Chrome",
+   "mem_peak": 210526315
+  },
+  {
+   "pid": 600,
+   "ppid": 1,
+   "uid": 501,
+   "name": "Code",
+   "executable_path": "/Applications/Visual Studio Code.app/Contents/MacOS/Electron",
+   "argv": [
+    "Code"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 3.0,
+   "mem_bytes": 1170000000,
+   "energy_w": 1.2,
+   "app_name": "Visual Studio Code",
+   "app_bundle_id": "com.microsoft.VSCode",
+   "mem_peak": 1170000000
+  },
+  {
+   "pid": 2000,
+   "ppid": 600,
+   "uid": 501,
+   "name": "Code Helper",
+   "executable_path": "/usr/bin/Code Helper",
+   "argv": [
+    "Code Helper"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.1,
+   "mem_bytes": 175000000,
+   "energy_w": 0.02,
+   "app_name": "Visual Studio Code",
+   "app_bundle_id": "com.microsoft.VSCode",
+   "mem_peak": 175000000
+  },
+  {
+   "pid": 2001,
+   "ppid": 600,
+   "uid": 501,
+   "name": "Code Helper",
+   "executable_path": "/usr/bin/Code Helper",
+   "argv": [
+    "Code Helper"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.1,
+   "mem_bytes": 175000000,
+   "energy_w": 0.02,
+   "app_name": "Visual Studio Code",
+   "app_bundle_id": "com.microsoft.VSCode",
+   "mem_peak": 175000000
+  },
+  {
+   "pid": 2002,
+   "ppid": 600,
+   "uid": 501,
+   "name": "Code Helper",
+   "executable_path": "/usr/bin/Code Helper",
+   "argv": [
+    "Code Helper"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.1,
+   "mem_bytes": 175000000,
+   "energy_w": 0.02,
+   "app_name": "Visual Studio Code",
+   "app_bundle_id": "com.microsoft.VSCode",
+   "mem_peak": 175000000
+  },
+  {
+   "pid": 2003,
+   "ppid": 600,
+   "uid": 501,
+   "name": "Code Helper",
+   "executable_path": "/usr/bin/Code Helper",
+   "argv": [
+    "Code Helper"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.1,
+   "mem_bytes": 175000000,
+   "energy_w": 0.02,
+   "app_name": "Visual Studio Code",
+   "app_bundle_id": "com.microsoft.VSCode",
+   "mem_peak": 175000000
+  },
+  {
+   "pid": 2004,
+   "ppid": 600,
+   "uid": 501,
+   "name": "Code Helper",
+   "executable_path": "/usr/bin/Code Helper",
+   "argv": [
+    "Code Helper"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.1,
+   "mem_bytes": 175000000,
+   "energy_w": 0.02,
+   "app_name": "Visual Studio Code",
+   "app_bundle_id": "com.microsoft.VSCode",
+   "mem_peak": 175000000
+  },
+  {
+   "pid": 2005,
+   "ppid": 600,
+   "uid": 501,
+   "name": "Code Helper",
+   "executable_path": "/usr/bin/Code Helper",
+   "argv": [
+    "Code Helper"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.1,
+   "mem_bytes": 175000000,
+   "energy_w": 0.02,
+   "app_name": "Visual Studio Code",
+   "app_bundle_id": "com.microsoft.VSCode",
+   "mem_peak": 175000000
+  },
+  {
+   "pid": 2006,
+   "ppid": 600,
+   "uid": 501,
+   "name": "Code Helper",
+   "executable_path": "/usr/bin/Code Helper",
+   "argv": [
+    "Code Helper"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.1,
+   "mem_bytes": 175000000,
+   "energy_w": 0.02,
+   "app_name": "Visual Studio Code",
+   "app_bundle_id": "com.microsoft.VSCode",
+   "mem_peak": 175000000
+  },
+  {
+   "pid": 2007,
+   "ppid": 600,
+   "uid": 501,
+   "name": "Code Helper",
+   "executable_path": "/usr/bin/Code Helper",
+   "argv": [
+    "Code Helper"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.1,
+   "mem_bytes": 175000000,
+   "energy_w": 0.02,
+   "app_name": "Visual Studio Code",
+   "app_bundle_id": "com.microsoft.VSCode",
+   "mem_peak": 175000000
+  },
+  {
+   "pid": 2008,
+   "ppid": 600,
+   "uid": 501,
+   "name": "Code Helper",
+   "executable_path": "/usr/bin/Code Helper",
+   "argv": [
+    "Code Helper"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.1,
+   "mem_bytes": 175000000,
+   "energy_w": 0.02,
+   "app_name": "Visual Studio Code",
+   "app_bundle_id": "com.microsoft.VSCode",
+   "mem_peak": 175000000
+  },
+  {
+   "pid": 2009,
+   "ppid": 600,
+   "uid": 501,
+   "name": "Code Helper",
+   "executable_path": "/usr/bin/Code Helper",
+   "argv": [
+    "Code Helper"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.1,
+   "mem_bytes": 175000000,
+   "energy_w": 0.02,
+   "app_name": "Visual Studio Code",
+   "app_bundle_id": "com.microsoft.VSCode",
+   "mem_peak": 175000000
+  },
+  {
+   "pid": 2010,
+   "ppid": 600,
+   "uid": 501,
+   "name": "Code Helper",
+   "executable_path": "/usr/bin/Code Helper",
+   "argv": [
+    "Code Helper"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.1,
+   "mem_bytes": 175000000,
+   "energy_w": 0.02,
+   "app_name": "Visual Studio Code",
+   "app_bundle_id": "com.microsoft.VSCode",
+   "mem_peak": 175000000
+  },
+  {
+   "pid": 2011,
+   "ppid": 600,
+   "uid": 501,
+   "name": "Code Helper",
+   "executable_path": "/usr/bin/Code Helper",
+   "argv": [
+    "Code Helper"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.1,
+   "mem_bytes": 175000000,
+   "energy_w": 0.02,
+   "app_name": "Visual Studio Code",
+   "app_bundle_id": "com.microsoft.VSCode",
+   "mem_peak": 175000000
+  },
+  {
+   "pid": 2012,
+   "ppid": 600,
+   "uid": 501,
+   "name": "Code Helper",
+   "executable_path": "/usr/bin/Code Helper",
+   "argv": [
+    "Code Helper"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.1,
+   "mem_bytes": 175000000,
+   "energy_w": 0.02,
+   "app_name": "Visual Studio Code",
+   "app_bundle_id": "com.microsoft.VSCode",
+   "mem_peak": 175000000
+  },
+  {
+   "pid": 2013,
+   "ppid": 600,
+   "uid": 501,
+   "name": "Code Helper",
+   "executable_path": "/usr/bin/Code Helper",
+   "argv": [
+    "Code Helper"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.1,
+   "mem_bytes": 175000000,
+   "energy_w": 0.02,
+   "app_name": "Visual Studio Code",
+   "app_bundle_id": "com.microsoft.VSCode",
+   "mem_peak": 175000000
+  },
+  {
+   "pid": 2014,
+   "ppid": 600,
+   "uid": 501,
+   "name": "Code Helper",
+   "executable_path": "/usr/bin/Code Helper",
+   "argv": [
+    "Code Helper"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.1,
+   "mem_bytes": 175000000,
+   "energy_w": 0.02,
+   "app_name": "Visual Studio Code",
+   "app_bundle_id": "com.microsoft.VSCode",
+   "mem_peak": 175000000
+  },
+  {
+   "pid": 2015,
+   "ppid": 600,
+   "uid": 501,
+   "name": "Code Helper",
+   "executable_path": "/usr/bin/Code Helper",
+   "argv": [
+    "Code Helper"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.1,
+   "mem_bytes": 175000000,
+   "energy_w": 0.02,
+   "app_name": "Visual Studio Code",
+   "app_bundle_id": "com.microsoft.VSCode",
+   "mem_peak": 175000000
+  },
+  {
+   "pid": 2016,
+   "ppid": 600,
+   "uid": 501,
+   "name": "Code Helper",
+   "executable_path": "/usr/bin/Code Helper",
+   "argv": [
+    "Code Helper"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.1,
+   "mem_bytes": 175000000,
+   "energy_w": 0.02,
+   "app_name": "Visual Studio Code",
+   "app_bundle_id": "com.microsoft.VSCode",
+   "mem_peak": 175000000
+  },
+  {
+   "pid": 2017,
+   "ppid": 600,
+   "uid": 501,
+   "name": "Code Helper",
+   "executable_path": "/usr/bin/Code Helper",
+   "argv": [
+    "Code Helper"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.1,
+   "mem_bytes": 175000000,
+   "energy_w": 0.02,
+   "app_name": "Visual Studio Code",
+   "app_bundle_id": "com.microsoft.VSCode",
+   "mem_peak": 175000000
+  },
+  {
+   "pid": 2018,
+   "ppid": 600,
+   "uid": 501,
+   "name": "Code Helper",
+   "executable_path": "/usr/bin/Code Helper",
+   "argv": [
+    "Code Helper"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.1,
+   "mem_bytes": 175000000,
+   "energy_w": 0.02,
+   "app_name": "Visual Studio Code",
+   "app_bundle_id": "com.microsoft.VSCode",
+   "mem_peak": 175000000
+  },
+  {
+   "pid": 2019,
+   "ppid": 600,
+   "uid": 501,
+   "name": "Code Helper",
+   "executable_path": "/usr/bin/Code Helper",
+   "argv": [
+    "Code Helper"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.1,
+   "mem_bytes": 175000000,
+   "energy_w": 0.02,
+   "app_name": "Visual Studio Code",
+   "app_bundle_id": "com.microsoft.VSCode",
+   "mem_peak": 175000000
+  },
+  {
+   "pid": 2020,
+   "ppid": 600,
+   "uid": 501,
+   "name": "Code Helper",
+   "executable_path": "/usr/bin/Code Helper",
+   "argv": [
+    "Code Helper"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.1,
+   "mem_bytes": 175000000,
+   "energy_w": 0.02,
+   "app_name": "Visual Studio Code",
+   "app_bundle_id": "com.microsoft.VSCode",
+   "mem_peak": 175000000
+  },
+  {
+   "pid": 2021,
+   "ppid": 600,
+   "uid": 501,
+   "name": "Code Helper",
+   "executable_path": "/usr/bin/Code Helper",
+   "argv": [
+    "Code Helper"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.1,
+   "mem_bytes": 175000000,
+   "energy_w": 0.02,
+   "app_name": "Visual Studio Code",
+   "app_bundle_id": "com.microsoft.VSCode",
+   "mem_peak": 175000000
+  },
+  {
+   "pid": 2022,
+   "ppid": 600,
+   "uid": 501,
+   "name": "Code Helper",
+   "executable_path": "/usr/bin/Code Helper",
+   "argv": [
+    "Code Helper"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.1,
+   "mem_bytes": 175000000,
+   "energy_w": 0.02,
+   "app_name": "Visual Studio Code",
+   "app_bundle_id": "com.microsoft.VSCode",
+   "mem_peak": 175000000
+  },
+  {
+   "pid": 2023,
+   "ppid": 600,
+   "uid": 501,
+   "name": "Code Helper",
+   "executable_path": "/usr/bin/Code Helper",
+   "argv": [
+    "Code Helper"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.1,
+   "mem_bytes": 175000000,
+   "energy_w": 0.02,
+   "app_name": "Visual Studio Code",
+   "app_bundle_id": "com.microsoft.VSCode",
+   "mem_peak": 175000000
+  },
+  {
+   "pid": 2024,
+   "ppid": 600,
+   "uid": 501,
+   "name": "Code Helper",
+   "executable_path": "/usr/bin/Code Helper",
+   "argv": [
+    "Code Helper"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.1,
+   "mem_bytes": 175000000,
+   "energy_w": 0.02,
+   "app_name": "Visual Studio Code",
+   "app_bundle_id": "com.microsoft.VSCode",
+   "mem_peak": 175000000
+  },
+  {
+   "pid": 2025,
+   "ppid": 600,
+   "uid": 501,
+   "name": "Code Helper",
+   "executable_path": "/usr/bin/Code Helper",
+   "argv": [
+    "Code Helper"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.1,
+   "mem_bytes": 175000000,
+   "energy_w": 0.02,
+   "app_name": "Visual Studio Code",
+   "app_bundle_id": "com.microsoft.VSCode",
+   "mem_peak": 175000000
+  },
+  {
+   "pid": 2026,
+   "ppid": 600,
+   "uid": 501,
+   "name": "Code Helper",
+   "executable_path": "/usr/bin/Code Helper",
+   "argv": [
+    "Code Helper"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.1,
+   "mem_bytes": 175000000,
+   "energy_w": 0.02,
+   "app_name": "Visual Studio Code",
+   "app_bundle_id": "com.microsoft.VSCode",
+   "mem_peak": 175000000
+  },
+  {
+   "pid": 2027,
+   "ppid": 600,
+   "uid": 501,
+   "name": "Code Helper",
+   "executable_path": "/usr/bin/Code Helper",
+   "argv": [
+    "Code Helper"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.1,
+   "mem_bytes": 175000000,
+   "energy_w": 0.02,
+   "app_name": "Visual Studio Code",
+   "app_bundle_id": "com.microsoft.VSCode",
+   "mem_peak": 175000000
+  },
+  {
+   "pid": 2028,
+   "ppid": 600,
+   "uid": 501,
+   "name": "Code Helper",
+   "executable_path": "/usr/bin/Code Helper",
+   "argv": [
+    "Code Helper"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.1,
+   "mem_bytes": 175000000,
+   "energy_w": 0.02,
+   "app_name": "Visual Studio Code",
+   "app_bundle_id": "com.microsoft.VSCode",
+   "mem_peak": 175000000
+  },
+  {
+   "pid": 2029,
+   "ppid": 600,
+   "uid": 501,
+   "name": "Code Helper",
+   "executable_path": "/usr/bin/Code Helper",
+   "argv": [
+    "Code Helper"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.1,
+   "mem_bytes": 175000000,
+   "energy_w": 0.02,
+   "app_name": "Visual Studio Code",
+   "app_bundle_id": "com.microsoft.VSCode",
+   "mem_peak": 175000000
+  },
+  {
+   "pid": 2030,
+   "ppid": 600,
+   "uid": 501,
+   "name": "Code Helper",
+   "executable_path": "/usr/bin/Code Helper",
+   "argv": [
+    "Code Helper"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.1,
+   "mem_bytes": 175000000,
+   "energy_w": 0.02,
+   "app_name": "Visual Studio Code",
+   "app_bundle_id": "com.microsoft.VSCode",
+   "mem_peak": 175000000
+  },
+  {
+   "pid": 2031,
+   "ppid": 600,
+   "uid": 501,
+   "name": "Code Helper",
+   "executable_path": "/usr/bin/Code Helper",
+   "argv": [
+    "Code Helper"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.1,
+   "mem_bytes": 175000000,
+   "energy_w": 0.02,
+   "app_name": "Visual Studio Code",
+   "app_bundle_id": "com.microsoft.VSCode",
+   "mem_peak": 175000000
+  },
+  {
+   "pid": 2032,
+   "ppid": 600,
+   "uid": 501,
+   "name": "Code Helper",
+   "executable_path": "/usr/bin/Code Helper",
+   "argv": [
+    "Code Helper"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.1,
+   "mem_bytes": 175000000,
+   "energy_w": 0.02,
+   "app_name": "Visual Studio Code",
+   "app_bundle_id": "com.microsoft.VSCode",
+   "mem_peak": 175000000
+  },
+  {
+   "pid": 2033,
+   "ppid": 600,
+   "uid": 501,
+   "name": "Code Helper",
+   "executable_path": "/usr/bin/Code Helper",
+   "argv": [
+    "Code Helper"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.1,
+   "mem_bytes": 175000000,
+   "energy_w": 0.02,
+   "app_name": "Visual Studio Code",
+   "app_bundle_id": "com.microsoft.VSCode",
+   "mem_peak": 175000000
+  },
+  {
+   "pid": 2034,
+   "ppid": 600,
+   "uid": 501,
+   "name": "Code Helper",
+   "executable_path": "/usr/bin/Code Helper",
+   "argv": [
+    "Code Helper"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.1,
+   "mem_bytes": 175000000,
+   "energy_w": 0.02,
+   "app_name": "Visual Studio Code",
+   "app_bundle_id": "com.microsoft.VSCode",
+   "mem_peak": 175000000
+  },
+  {
+   "pid": 2035,
+   "ppid": 600,
+   "uid": 501,
+   "name": "Code Helper",
+   "executable_path": "/usr/bin/Code Helper",
+   "argv": [
+    "Code Helper"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.1,
+   "mem_bytes": 175000000,
+   "energy_w": 0.02,
+   "app_name": "Visual Studio Code",
+   "app_bundle_id": "com.microsoft.VSCode",
+   "mem_peak": 175000000
+  },
+  {
+   "pid": 2036,
+   "ppid": 600,
+   "uid": 501,
+   "name": "Code Helper",
+   "executable_path": "/usr/bin/Code Helper",
+   "argv": [
+    "Code Helper"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.1,
+   "mem_bytes": 175000000,
+   "energy_w": 0.02,
+   "app_name": "Visual Studio Code",
+   "app_bundle_id": "com.microsoft.VSCode",
+   "mem_peak": 175000000
+  },
+  {
+   "pid": 2037,
+   "ppid": 600,
+   "uid": 501,
+   "name": "Code Helper",
+   "executable_path": "/usr/bin/Code Helper",
+   "argv": [
+    "Code Helper"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.1,
+   "mem_bytes": 175000000,
+   "energy_w": 0.02,
+   "app_name": "Visual Studio Code",
+   "app_bundle_id": "com.microsoft.VSCode",
+   "mem_peak": 175000000
+  },
+  {
+   "pid": 2038,
+   "ppid": 600,
+   "uid": 501,
+   "name": "Code Helper",
+   "executable_path": "/usr/bin/Code Helper",
+   "argv": [
+    "Code Helper"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.1,
+   "mem_bytes": 175000000,
+   "energy_w": 0.02,
+   "app_name": "Visual Studio Code",
+   "app_bundle_id": "com.microsoft.VSCode",
+   "mem_peak": 175000000
+  },
+  {
+   "pid": 2039,
+   "ppid": 600,
+   "uid": 501,
+   "name": "Code Helper",
+   "executable_path": "/usr/bin/Code Helper",
+   "argv": [
+    "Code Helper"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.1,
+   "mem_bytes": 175000000,
+   "energy_w": 0.02,
+   "app_name": "Visual Studio Code",
+   "app_bundle_id": "com.microsoft.VSCode",
+   "mem_peak": 175000000
+  },
+  {
+   "pid": 700,
+   "ppid": 1,
+   "uid": 501,
+   "name": "Terminal",
+   "executable_path": "/System/Applications/Utilities/Terminal.app/Contents/MacOS/Terminal",
+   "argv": [
+    "Terminal"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.5,
+   "mem_bytes": 250000000,
+   "energy_w": 0.0,
+   "app_name": "Terminal",
+   "app_bundle_id": "com.apple.Terminal",
+   "mem_peak": 250000000
+  },
+  {
+   "pid": 701,
+   "ppid": 700,
+   "uid": 501,
+   "name": "zsh",
+   "executable_path": "/usr/bin/zsh",
+   "argv": [
+    "zsh"
+   ],
+   "cwd": "/Users/me/code/storefront-web",
+   "start_time": 1793545200,
+   "cpu_pct": 0.0,
+   "mem_bytes": 5000000,
+   "energy_w": 0.0,
+   "app_name": "Terminal",
+   "app_bundle_id": "com.apple.Terminal",
+   "mem_peak": 5000000
+  },
+  {
+   "pid": 702,
+   "ppid": 701,
+   "uid": 501,
+   "name": "node",
+   "executable_path": "/usr/bin/node",
+   "argv": [
+    "node",
+    "next",
+    "dev",
+    "--port",
+    "4322"
+   ],
+   "cwd": "/Users/me/code/storefront-web",
+   "start_time": 1793538000,
+   "cpu_pct": 0.0,
+   "mem_bytes": 458000000,
+   "energy_w": 0.0,
+   "app_name": "Terminal",
+   "app_bundle_id": "com.apple.Terminal",
+   "mem_peak": 458000000
+  },
+  {
+   "pid": 703,
+   "ppid": 700,
+   "uid": 501,
+   "name": "zsh",
+   "executable_path": "/usr/bin/zsh",
+   "argv": [
+    "zsh"
+   ],
+   "cwd": "/Users/me/code/shop",
+   "start_time": 1793545200,
+   "cpu_pct": 0.0,
+   "mem_bytes": 5000000,
+   "energy_w": 0.0,
+   "app_name": "Terminal",
+   "app_bundle_id": "com.apple.Terminal",
+   "mem_peak": 5000000
+  },
+  {
+   "pid": 704,
+   "ppid": 703,
+   "uid": 501,
+   "name": "node",
+   "executable_path": "/usr/bin/node",
+   "argv": [
+    "node",
+    "/opt/homebrew/lib/node_modules/@anthropic-ai/claude-code/cli.js"
+   ],
+   "cwd": "/Users/me/code/shop",
+   "start_time": 1793543400,
+   "cpu_pct": 12.0,
+   "mem_bytes": 1070000000,
+   "energy_w": 0.0,
+   "app_name": "Terminal",
+   "app_bundle_id": "com.apple.Terminal",
+   "mem_peak": 1070000000
+  },
+  {
+   "pid": 705,
+   "ppid": 704,
+   "uid": 501,
+   "name": "node",
+   "executable_path": "/usr/bin/node",
+   "argv": [
+    "node",
+    "next",
+    "dev",
+    "--port",
+    "3000"
+   ],
+   "cwd": "/Users/me/code/shop",
+   "start_time": 1793547000,
+   "cpu_pct": 6.0,
+   "mem_bytes": 412000000,
+   "energy_w": 0.0,
+   "app_name": "Terminal",
+   "app_bundle_id": "com.apple.Terminal",
+   "mem_peak": 412000000
+  },
+  {
+   "pid": 706,
+   "ppid": 704,
+   "uid": 501,
+   "name": "Google Chrome for Testing",
+   "executable_path": "/usr/bin/Google Chrome for Testing",
+   "argv": [
+    "Google Chrome for Testing",
+    "--headless"
+   ],
+   "cwd": "/Users/me/code/shop",
+   "start_time": 1793545200,
+   "cpu_pct": 1.0,
+   "mem_bytes": 380000000,
+   "energy_w": 0.0,
+   "app_name": "Terminal",
+   "app_bundle_id": "com.apple.Terminal",
+   "mem_peak": 380000000
+  },
+  {
+   "pid": 707,
+   "ppid": 704,
+   "uid": 501,
+   "name": "node",
+   "executable_path": "/usr/bin/node",
+   "argv": [
+    "node",
+    "playwright-mcp"
+   ],
+   "cwd": "/Users/me/code/shop",
+   "start_time": 1793545200,
+   "cpu_pct": 0.0,
+   "mem_bytes": 95000000,
+   "energy_w": 0.0,
+   "app_name": "Terminal",
+   "app_bundle_id": "com.apple.Terminal",
+   "mem_peak": 95000000
+  },
+  {
+   "pid": 708,
+   "ppid": 700,
+   "uid": 501,
+   "name": "zsh",
+   "executable_path": "/usr/bin/zsh",
+   "argv": [
+    "zsh"
+   ],
+   "cwd": "/Users/me/code/api",
+   "start_time": 1793545200,
+   "cpu_pct": 0.0,
+   "mem_bytes": 5000000,
+   "energy_w": 0.0,
+   "app_name": "Terminal",
+   "app_bundle_id": "com.apple.Terminal",
+   "mem_peak": 5000000
+  },
+  {
+   "pid": 709,
+   "ppid": 708,
+   "uid": 501,
+   "name": "python3",
+   "executable_path": "/usr/bin/python3",
+   "argv": [
+    "python3",
+    "-m",
+    "uvicorn",
+    "main:app",
+    "--port",
+    "8000"
+   ],
+   "cwd": "/Users/me/code/api",
+   "start_time": 1793541600,
+   "cpu_pct": 0.0,
+   "mem_bytes": 180000000,
+   "energy_w": 0.0,
+   "app_name": "Terminal",
+   "app_bundle_id": "com.apple.Terminal",
+   "mem_peak": 180000000
+  },
+  {
+   "pid": 1,
+   "ppid": 0,
+   "uid": 0,
+   "name": "launchd",
+   "executable_path": "/sbin/launchd",
+   "argv": [
+    "launchd"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 0.1,
+   "mem_bytes": 20000000,
+   "energy_w": 0.0,
+   "app_name": "macOS",
+   "app_bundle_id": null,
+   "mem_peak": 20000000
+  },
+  {
+   "pid": 90,
+   "ppid": 1,
+   "uid": 88,
+   "name": "WindowServer",
+   "executable_path": "/System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer",
+   "argv": [
+    "WindowServer"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 6.0,
+   "mem_bytes": 1400000000,
+   "energy_w": 0.0,
+   "app_name": "macOS",
+   "app_bundle_id": null,
+   "mem_peak": 1400000000
+  },
+  {
+   "pid": 91,
+   "ppid": 1,
+   "uid": 0,
+   "name": "mds_stores",
+   "executable_path": "/System/Library/Frameworks/CoreServices.framework/mds_stores",
+   "argv": [
+    "mds_stores"
+   ],
+   "cwd": "",
+   "start_time": 1793545200,
+   "cpu_pct": 2.0,
+   "mem_bytes": 300000000,
+   "energy_w": 0.0,
+   "app_name": "macOS",
+   "app_bundle_id": null,
+   "mem_peak": 300000000
+  }
+ ],
+ "apps": [
+  {
+   "key": "bundle:com.google.Chrome",
+   "app": {
+    "bundle_id": "com.google.Chrome",
+    "name": "Google Chrome",
+    "bundle_path": "/Applications/Google Chrome.app",
+    "version": "130.0"
+   },
+   "cpu_pct": 23.0,
+   "mem_bytes": 21230000000,
+   "energy_w": 7.25,
+   "process_count": 96,
+   "pids": [
+    500,
+    1000,
+    1001,
+    1002,
+    1003,
+    1004,
+    1005,
+    1006,
+    1007,
+    1008,
+    1009,
+    1010,
+    1011,
+    1012,
+    1013,
+    1014,
+    1015,
+    1016,
+    1017,
+    1018,
+    1019,
+    1020,
+    1021,
+    1022,
+    1023,
+    1024,
+    1025,
+    1026,
+    1027,
+    1028,
+    1029,
+    1030,
+    1031,
+    1032,
+    1033,
+    1034,
+    1035,
+    1036,
+    1037,
+    1038,
+    1039,
+    1040,
+    1041,
+    1042,
+    1043,
+    1044,
+    1045,
+    1046,
+    1047,
+    1048,
+    1049,
+    1050,
+    1051,
+    1052,
+    1053,
+    1054,
+    1055,
+    1056,
+    1057,
+    1058,
+    1059,
+    1060,
+    1061,
+    1062,
+    1063,
+    1064,
+    1065,
+    1066,
+    1067,
+    1068,
+    1069,
+    1070,
+    1071,
+    1072,
+    1073,
+    1074,
+    1075,
+    1076,
+    1077,
+    1078,
+    1079,
+    1080,
+    1081,
+    1082,
+    1083,
+    1084,
+    1085,
+    1086,
+    1087,
+    1088,
+    1089,
+    1090,
+    1091,
+    1092,
+    1093,
+    1094
+   ],
+   "root_pid": 500
+  },
+  {
+   "key": "bundle:com.microsoft.VSCode",
+   "app": {
+    "bundle_id": "com.microsoft.VSCode",
+    "name": "Visual Studio Code",
+    "bundle_path": "/Applications/Visual Studio Code.app",
+    "version": "1.95.0"
+   },
+   "cpu_pct": 7.0,
+   "mem_bytes": 8170000000,
+   "energy_w": 2.0,
+   "process_count": 41,
+   "pids": [
+    600,
+    2000,
+    2001,
+    2002,
+    2003,
+    2004,
+    2005,
+    2006,
+    2007,
+    2008,
+    2009,
+    2010,
+    2011,
+    2012,
+    2013,
+    2014,
+    2015,
+    2016,
+    2017,
+    2018,
+    2019,
+    2020,
+    2021,
+    2022,
+    2023,
+    2024,
+    2025,
+    2026,
+    2027,
+    2028,
+    2029,
+    2030,
+    2031,
+    2032,
+    2033,
+    2034,
+    2035,
+    2036,
+    2037,
+    2038,
+    2039
+   ],
+   "root_pid": 600
+  },
+  {
+   "key": "bundle:com.apple.Terminal",
+   "app": {
+    "bundle_id": "com.apple.Terminal",
+    "name": "Terminal",
+    "bundle_path": "/System/Applications/Utilities/Terminal.app",
+    "version": "2.14"
+   },
+   "cpu_pct": 19.5,
+   "mem_bytes": 2860000000,
+   "energy_w": 0.0,
+   "process_count": 10,
+   "pids": [
+    700,
+    701,
+    702,
+    703,
+    704,
+    705,
+    706,
+    707,
+    708,
+    709
+   ],
+   "root_pid": 700
+  },
+  {
+   "key": "system:macos",
+   "app": {
+    "bundle_id": null,
+    "name": "macOS",
+    "bundle_path": null,
+    "version": null
+   },
+   "cpu_pct": 8.1,
+   "mem_bytes": 1720000000,
+   "energy_w": 0.0,
+   "process_count": 3,
+   "pids": [
+    1,
+    90,
+    91
+   ],
+   "root_pid": 1
+  }
+ ],
+ "ports": [
+  {
+   "pid": 702,
+   "port": 4322,
+   "address": "*",
+   "protocol": "TCP",
+   "command": "node"
+  },
+  {
+   "pid": 705,
+   "port": 3000,
+   "address": "*",
+   "protocol": "TCP",
+   "command": "node"
+  },
+  {
+   "pid": 709,
+   "port": 8000,
+   "address": "127.0.0.1",
+   "protocol": "TCP",
+   "command": "python3"
+  }
+ ],
+ "projects": [
+  {
+   "project": {
+    "folder_path": "/Users/me/code/shop",
+    "name": "shop"
+   },
+   "process_count": 5,
+   "mem_bytes": 1962000000,
+   "cpu_pct": 19.0,
+   "ports": [
+    3000
+   ],
+   "pids": [
+    703,
+    704,
+    705,
+    706,
+    707
+   ],
+   "servers": [
+    {
+     "project": "shop",
+     "process_pid": 705,
+     "command": "node next dev --port 3000",
+     "port": 3000,
+     "started_at": 1793547000,
+     "last_active_at": 1793548800,
+     "mem_bytes": 412000000,
+     "idle_secs": 0,
+     "idle": false
+    }
+   ],
+   "state": "serving"
+  },
+  {
+   "project": {
+    "folder_path": "/Users/me/code/storefront-web",
+    "name": "storefront-web"
+   },
+   "process_count": 2,
+   "mem_bytes": 463000000,
+   "cpu_pct": 0.0,
+   "ports": [
+    4322
+   ],
+   "pids": [
+    701,
+    702
+   ],
+   "servers": [
+    {
+     "project": "storefront-web",
+     "process_pid": 702,
+     "command": "node next dev --port 4322",
+     "port": 4322,
+     "started_at": 1793538000,
+     "last_active_at": 1793541600,
+     "mem_bytes": 458000000,
+     "idle_secs": 7200,
+     "idle": true
+    }
+   ],
+   "state": "idle"
+  },
+  {
+   "project": {
+    "folder_path": "/Users/me/code/api",
+    "name": "api"
+   },
+   "process_count": 2,
+   "mem_bytes": 185000000,
+   "cpu_pct": 0.0,
+   "ports": [
+    8000
+   ],
+   "pids": [
+    708,
+    709
+   ],
+   "servers": [
+    {
+     "project": "api",
+     "process_pid": 709,
+     "command": "python3 -m uvicorn main:app",
+     "port": 8000,
+     "started_at": 1793541600,
+     "last_active_at": 1793544800,
+     "mem_bytes": 180000000,
+     "idle_secs": 4000,
+     "idle": true
+    }
+   ],
+   "state": "idle"
+  }
+ ],
+ "agents": [
+  {
+   "agent_kind": "claude_code",
+   "pid": 704,
+   "project": "shop",
+   "state": "working",
+   "started_at": 1793543400,
+   "mem_bytes": 1957000000,
+   "cpu_percent": 19.0,
+   "spawned_pids": [
+    705,
+    706,
+    707
+   ],
+   "branch_or_task": "feat/checkout",
+   "started": [
+    {
+     "pid": 705,
+     "name": "node",
+     "role": "dev server :3000",
+     "mem_bytes": 412000000,
+     "ports": [
+      3000
+     ]
+    },
+    {
+     "pid": 706,
+     "name": "Google Chrome for Testing",
+     "role": "Chrome for Testing",
+     "mem_bytes": 380000000,
+     "ports": []
+    },
+    {
+     "pid": 707,
+     "name": "node",
+     "role": "MCP server",
+     "mem_bytes": 95000000,
+     "ports": []
+    }
+   ]
+  }
+ ],
+ "plans": [
+  {
+   "provider": "Claude",
+   "plan": "Max 20x",
+   "window": "week",
+   "limit_kind": "tokens",
+   "used_pct": 28.0,
+   "resets_at": 1793901600,
+   "pace_state": "ahead",
+   "pace_text": "well under limit",
+   "source": "~/.claude/projects"
+  },
+  {
+   "provider": "Codex",
+   "plan": "Pro",
+   "window": "5h",
+   "limit_kind": "usage",
+   "used_pct": 81.0,
+   "resets_at": 1793556000,
+   "pace_state": "runs_out",
+   "pace_text": "runs out in 42 min",
+   "source": "~/.codex/sessions"
+  }
+ ],
+ "containers": [
+  {
+   "id": "a1b2c3d4e5f6",
+   "name": "rabbitmq",
+   "image": "rabbitmq:3",
+   "stack": "shop",
+   "project_hint": "/Users/me/code/shop",
+   "state": "running",
+   "status": "Up 3 hours",
+   "mem_bytes": 206000000,
+   "mem_limit": 240000000,
+   "cpu_pct": 1.5,
+   "published_ports": [
+    5672
+   ]
+  },
+  {
+   "id": "0f9e8d7c6b5a",
+   "name": "postgres",
+   "image": "postgres:16",
+   "stack": "shop",
+   "project_hint": "/Users/me/code/shop",
+   "state": "running",
+   "status": "Up 3 hours",
+   "mem_bytes": 120000000,
+   "mem_limit": 0,
+   "cpu_pct": 0.4,
+   "published_ports": [
+    5432
+   ]
+  },
+  {
+   "id": "112233445566",
+   "name": "redis",
+   "image": "redis:7",
+   "stack": null,
+   "state": "exited",
+   "status": "Exited (0) 2 days ago",
+   "published_ports": []
+  }
+ ],
+ "docker_available": true
+}

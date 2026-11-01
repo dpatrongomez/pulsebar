@@ -1,0 +1,105 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pulsebar.app/schemas/projects.schema.json",
+  "title": "pulsebar projects --json",
+  "type": "object",
+  "properties": {
+    "idle_banner": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "projects": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "folder_path": {
+            "type": "string"
+          },
+          "process_count": {
+            "type": "integer"
+          },
+          "mem_bytes": {
+            "type": "integer"
+          },
+          "cpu_pct": {
+            "type": "number"
+          },
+          "ports": {
+            "type": "array",
+            "items": {
+              "type": "integer"
+            }
+          },
+          "state": {
+            "enum": [
+              "running",
+              "serving",
+              "idle"
+            ]
+          },
+          "servers": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "pid": {
+                  "type": "integer"
+                },
+                "port": {
+                  "type": "integer"
+                },
+                "command": {
+                  "type": "string"
+                },
+                "mem_bytes": {
+                  "type": "integer"
+                },
+                "idle_secs": {
+                  "type": "integer"
+                },
+                "idle": {
+                  "type": "boolean"
+                },
+                "started_at": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "pid",
+                "port",
+                "command",
+                "mem_bytes",
+                "idle_secs",
+                "idle",
+                "started_at"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "name",
+          "folder_path",
+          "process_count",
+          "mem_bytes",
+          "cpu_pct",
+          "ports",
+          "state",
+          "servers"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "idle_banner",
+    "projects"
+  ],
+  "additionalProperties": false
+}

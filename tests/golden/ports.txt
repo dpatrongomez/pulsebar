@@ -1,0 +1,4 @@
+PORT  PID  PROCESS  APP       PROJECT         MEMORY       IDLE
+4322  702  node     Terminal  storefront-web  458 MB  2 h 0 min
+3000  705  node     Terminal  shop            412 MB        0 s
+8000  709  python3  Terminal  api             180 MB  1 h 6 min

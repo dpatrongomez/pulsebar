@@ -122,7 +122,8 @@ pub fn run_window(tab: Tab, app: Option<String>) -> anyhow::Result<()> {
     let options = eframe::NativeOptions {
         viewport: eframe::egui::ViewportBuilder::default()
             .with_title("PulseBar")
-            .with_inner_size([1180.0, 760.0])
+            // Screenshots (PULSEBAR_SCREENSHOT) use a taller window so whole tabs fit.
+            .with_inner_size(if std::env::var_os("PULSEBAR_SCREENSHOT").is_some() { [1180.0, 1400.0] } else { [1180.0, 760.0] })
             .with_min_inner_size([820.0, 520.0]),
         ..Default::default()
     };

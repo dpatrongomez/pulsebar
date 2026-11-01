@@ -8,10 +8,8 @@ use crate::settings::{NumberFont, Settings, Theme};
 #[derive(Clone, Copy)]
 pub struct Palette {
     pub accent: Color32,
-    pub series: [Color32; 4],
     pub danger: Color32,
     pub warn: Color32,
-    pub ok: Color32,
 }
 
 pub fn palette(theme: Theme, dark: bool) -> Palette {
@@ -20,36 +18,20 @@ pub fn palette(theme: Theme, dark: bool) -> Palette {
             let g = if dark { Color32::from_gray(220) } else { Color32::from_gray(40) };
             Palette {
                 accent: g,
-                series: [g, Color32::from_gray(150), Color32::from_gray(110), Color32::from_gray(80)],
                 danger: Color32::from_rgb(220, 60, 60),
                 warn: Color32::from_gray(160),
-                ok: g,
             }
         }
         Theme::Brand => Palette {
             accent: Color32::from_rgb(22, 176, 110),
-            series: [
-                Color32::from_rgb(22, 176, 110),
-                Color32::from_rgb(64, 132, 245),
-                Color32::from_rgb(245, 166, 35),
-                Color32::from_rgb(170, 100, 230),
-            ],
             danger: Color32::from_rgb(230, 70, 70),
             warn: Color32::from_rgb(245, 166, 35),
-            ok: Color32::from_rgb(22, 176, 110),
         },
         // Okabe–Ito: distinguishable for protanopia/deuteranopia/tritanopia.
         Theme::ColorBlind => Palette {
             accent: Color32::from_rgb(0, 114, 178),
-            series: [
-                Color32::from_rgb(0, 114, 178),
-                Color32::from_rgb(230, 159, 0),
-                Color32::from_rgb(0, 158, 115),
-                Color32::from_rgb(204, 121, 167),
-            ],
             danger: Color32::from_rgb(213, 94, 0),
             warn: Color32::from_rgb(240, 228, 66),
-            ok: Color32::from_rgb(0, 158, 115),
         },
     }
 }
@@ -243,4 +225,57 @@ pub fn donut(ui: &mut egui::Ui, diameter: f32, parts: &[(f64, Color32)], big: &s
     let weak = ui.visuals().weak_text_color();
     p.text(c - Vec2::new(0.0, 7.0), egui::Align2::CENTER_CENTER, big, egui::FontId::proportional(diameter * 0.15), strong);
     p.text(c + Vec2::new(0.0, diameter * 0.1), egui::Align2::CENTER_CENTER, small, egui::FontId::proportional(diameter * 0.1), weak);
+}
+
+/// Area chart for the hero cards: faint horizontal grid, gradient fill, 2 px line.
+pub fn area_chart(p: &egui::Painter, r: Rect, values: &[f64], color: Color32, max: Option<f64>, grid: Color32) {
+    for i in 0..4 {
+        let y = r.top() + r.height() * i as f32 / 3.0;
+        p.line_segment([Pos2::new(r.left(), y), Pos2::new(r.right(), y)], Stroke::new(1.0, grid.gamma_multiply(0.25)));
+    }
+    if values.len() < 2 {
+        p.text(r.center(), egui::Align2::CENTER_CENTER, "Collecting data…", egui::FontId::proportional(13.0), grid);
+        return;
+    }
+    let hi = max.unwrap_or_else(|| values.iter().cloned().fold(0.0, f64::max) * 1.15).max(1e-9);
+    let n = values.len();
+    let pts: Vec<Pos2> = values
+        .iter()
+        .enumerate()
+        .map(|(i, v)| Pos2::new(r.left() + r.width() * i as f32 / (n - 1) as f32, r.bottom() - r.height() * (v / hi).clamp(0.0, 1.0) as f32))
+        .collect();
+    // Gradient fill as a triangle strip: line colour fading to transparent at the bottom.
+    let mut mesh = egui::Mesh::default();
+    let top_c = color.gamma_multiply(0.35);
+    let bottom_c = color.gamma_multiply(0.02);
+    for (i, pt) in pts.iter().enumerate() {
+        mesh.colored_vertex(*pt, top_c);
+        mesh.colored_vertex(Pos2::new(pt.x, r.bottom()), bottom_c);
+        if i > 0 {
+            let k = (i * 2) as u32;
+            mesh.add_triangle(k - 2, k - 1, k);
+            mesh.add_triangle(k - 1, k, k + 1);
+        }
+    }
+    p.add(egui::Shape::mesh(mesh));
+    p.add(egui::Shape::line(pts, Stroke::new(2.0, color)));
+}
+
+/// Thin rounded progress bar (5 px) used in lists.
+pub fn thin_meter(ui: &mut egui::Ui, frac: f64, width: f32, color: Color32) {
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(width, 5.0), Sense::hover());
+    let p = ui.painter();
+    p.rect_filled(rect, 2.5, ui.visuals().extreme_bg_color);
+    let mut f = rect;
+    f.set_width((rect.width() * frac.clamp(0.0, 1.0) as f32).max(if frac > 0.0 { 3.0 } else { 0.0 }));
+    p.rect_filled(f, 2.5, color);
+}
+
+/// Small tinted chip ("8 P", "Playing").
+pub fn chip(ui: &mut egui::Ui, text: &str, color: Color32) {
+    let galley = ui.painter().layout_no_wrap(text.to_string(), egui::FontId::proportional(12.5), color);
+    let size = galley.size() + Vec2::new(14.0, 6.0);
+    let (r, _) = ui.allocate_exact_size(size, Sense::hover());
+    ui.painter().rect_filled(r, 7.0, color.gamma_multiply(0.18));
+    ui.painter().galley(r.center() - galley.size() / 2.0, galley, color);
 }

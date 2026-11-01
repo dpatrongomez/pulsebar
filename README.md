@@ -46,14 +46,22 @@ src/
 ## Build & run
 
 ```sh
-cargo build --release
+make build                             # = cargo build --release
 ./target/release/pulsebar app          # menu bar agent (opens the window on first launch)
 ./target/release/pulsebar status       # CLI
-packaging/bundle.sh                    # dist/PulseBar.app + zip (SIGN_ID / NOTARY_PROFILE to sign & notarize)
+make app                               # dist/PulseBar.app
+make dmg                               # dist/PulseBar-<version>.dmg — open it, drag PulseBar to Applications
+make install                           # build the app and copy it to /Applications
 ```
 
+`make dmg SIGN_ID="Developer ID Application: …" NOTARY_PROFILE=pulsebar` signs with Hardened
+Runtime and notarizes + staples the image (create the profile once with
+`xcrun notarytool store-credentials pulsebar`). Without `SIGN_ID` the app is ad-hoc signed: fine on
+this Mac, other Macs need right-click → Open the first time. The binary is universal when both
+`aarch64-apple-darwin` and `x86_64-apple-darwin` rustup targets are installed.
+
 `cargo build --no-default-features` builds the CLI + MCP only (no GUI dependencies).
-The Homebrew cask template is `packaging/pulsebar.rb`; it links the bundle executable as
+The Homebrew cask template is `packaging/pulsebar.rb` (installs from the dmg); it links the bundle executable as
 `pulsebar`, and that same binary acts as the CLI when run from a terminal.
 
 ## CLI

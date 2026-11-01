@@ -286,6 +286,10 @@ pub enum ActionIcon {
     Quit,
     /// Power symbol — force quit (SIGKILL).
     ForceQuit,
+    /// Chevron pointing up — move a row earlier in a list.
+    MoveUp,
+    /// Chevron pointing down — move a row later in a list.
+    MoveDown,
 }
 
 /// Round, frameless icon button for row actions. The glyph is weak until hovered, then
@@ -294,15 +298,23 @@ pub fn icon_button(ui: &mut egui::Ui, icon: ActionIcon, color: Color32, tip: &st
     let size = 26.0;
     let (r, resp) = ui.allocate_exact_size(Vec2::splat(size), Sense::click());
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), tip));
-    let resp = resp.on_hover_text(tip).on_hover_cursor(egui::CursorIcon::PointingHand);
+    let enabled = ui.is_enabled();
+    let resp = resp.on_hover_text(tip).on_disabled_hover_text(tip);
+    let resp = if enabled { resp.on_hover_cursor(egui::CursorIcon::PointingHand) } else { resp };
     let p = ui.painter();
-    let active = resp.hovered() || resp.has_focus();
+    let active = enabled && (resp.hovered() || resp.has_focus());
     if resp.is_pointer_button_down_on() {
         p.circle_filled(r.center(), size / 2.0, color.gamma_multiply(0.32));
     } else if active {
         p.circle_filled(r.center(), size / 2.0, color.gamma_multiply(0.18));
     }
-    let fg = if active { color } else { ui.visuals().weak_text_color() };
+    let fg = if active {
+        color
+    } else if enabled {
+        ui.visuals().weak_text_color()
+    } else {
+        ui.visuals().weak_text_color().gamma_multiply(0.4)
+    };
     let stroke = Stroke::new(1.8, fg);
     let c = r.center();
     match icon {
@@ -321,6 +333,12 @@ pub fn icon_button(ui: &mut egui::Ui, icon: ActionIcon, color: Color32, tip: &st
             }).collect();
             p.add(egui::Shape::line(pts, stroke));
             p.line_segment([c + Vec2::new(0.0, -rad - 1.0), c + Vec2::new(0.0, -1.0)], stroke);
+        }
+        ActionIcon::MoveUp | ActionIcon::MoveDown => {
+            let k = if matches!(icon, ActionIcon::MoveUp) { -1.0 } else { 1.0 };
+            // `k` puts the apex above (up) or below (down) the centre.
+            let pts = vec![c + Vec2::new(-4.5, -2.0 * k), c + Vec2::new(0.0, 2.0 * k), c + Vec2::new(4.5, -2.0 * k)];
+            p.add(egui::Shape::line(pts, stroke));
         }
     }
     resp

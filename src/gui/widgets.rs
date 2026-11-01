@@ -279,3 +279,49 @@ pub fn chip(ui: &mut egui::Ui, text: &str, color: Color32) {
     ui.painter().rect_filled(r, 7.0, color.gamma_multiply(0.18));
     ui.painter().galley(r.center() - galley.size() / 2.0, galley, color);
 }
+
+#[derive(Clone, Copy)]
+pub enum ActionIcon {
+    /// × — ask the process to quit.
+    Quit,
+    /// Power symbol — force quit (SIGKILL).
+    ForceQuit,
+}
+
+/// Round, frameless icon button for row actions. The glyph is weak until hovered, then
+/// takes `color` over a tinted circle. `tip` is the tooltip and the accessible name.
+pub fn icon_button(ui: &mut egui::Ui, icon: ActionIcon, color: Color32, tip: &str) -> egui::Response {
+    let size = 26.0;
+    let (r, resp) = ui.allocate_exact_size(Vec2::splat(size), Sense::click());
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), tip));
+    let resp = resp.on_hover_text(tip).on_hover_cursor(egui::CursorIcon::PointingHand);
+    let p = ui.painter();
+    let active = resp.hovered() || resp.has_focus();
+    if resp.is_pointer_button_down_on() {
+        p.circle_filled(r.center(), size / 2.0, color.gamma_multiply(0.32));
+    } else if active {
+        p.circle_filled(r.center(), size / 2.0, color.gamma_multiply(0.18));
+    }
+    let fg = if active { color } else { ui.visuals().weak_text_color() };
+    let stroke = Stroke::new(1.8, fg);
+    let c = r.center();
+    match icon {
+        ActionIcon::Quit => {
+            let d = 4.5;
+            p.line_segment([c + Vec2::new(-d, -d), c + Vec2::new(d, d)], stroke);
+            p.line_segment([c + Vec2::new(d, -d), c + Vec2::new(-d, d)], stroke);
+        }
+        ActionIcon::ForceQuit => {
+            // Arc open at the top (from 1 o'clock round to 11 o'clock) plus a stem.
+            let rad = 6.0;
+            let (a0, a1) = (-std::f32::consts::FRAC_PI_2 + 0.75, 3.0 * std::f32::consts::FRAC_PI_2 - 0.75);
+            let pts: Vec<Pos2> = (0..=24).map(|i| {
+                let a = a0 + (a1 - a0) * i as f32 / 24.0;
+                c + Vec2::new(a.cos(), a.sin()) * rad
+            }).collect();
+            p.add(egui::Shape::line(pts, stroke));
+            p.line_segment([c + Vec2::new(0.0, -rad - 1.0), c + Vec2::new(0.0, -1.0)], stroke);
+        }
+    }
+    resp
+}

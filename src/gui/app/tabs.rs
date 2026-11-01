@@ -261,8 +261,11 @@ impl PulseApp {
         let mut action: Option<(Target, Mode)> = None;
         let mut inspect: Option<i32> = None;
         let mut export: Option<bool> = None;
+        let mut shown_apps: Vec<String> = vec![];
+        let mut shown_procs: HashMap<String, Vec<i32>> = HashMap::new();
+        let danger = self.pal(ui.ctx()).danger;
         let card_fill = widgets::card_fill(ui.visuals().dark_mode);
-        egui::Frame::new().fill(card_fill).corner_radius(16.0).inner_margin(egui::Margin::symmetric(10, 14)).show(ui, |ui| {
+        let card = egui::Frame::new().fill(card_fill).corner_radius(16.0).inner_margin(egui::Margin::symmetric(10, 14)).show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
                 ui.add_space(10.0);
@@ -281,14 +284,23 @@ impl PulseApp {
                 });
             });
             ui.add_space(6.0);
-            let top = snap.top_apps(m, n);
-            let max = top.first().map(|a| a.metric(m)).unwrap_or(1.0).max(1e-9);
+            // While the pointer is over the list, keep last frame's order: values keep updating,
+            // rows don't move. New apps appear once the pointer leaves.
+            let top: Vec<&AppGroup> = match self.frozen.as_ref().filter(|f| f.metric == m) {
+                Some(f) => f.apps.iter().filter_map(|k| snap.apps.iter().find(|a| &a.key == k)).collect(),
+                None => snap.top_apps(m, n),
+            };
+            let max = top.iter().map(|a| a.metric(m)).fold(0.0, f64::max).max(1e-9);
             let hover_fill = if ui.visuals().dark_mode { Color32::from_rgb(38, 38, 42) } else { Color32::from_rgb(244, 244, 247) };
             for a in top {
+                shown_apps.push(a.key.clone());
                 let highlighted = self.highlight.as_deref() == Some(a.key.as_str());
                 let open = *self.expanded.get(&a.key).unwrap_or(&false);
                 let (rect, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 58.0), egui::Sense::click());
-                if highlighted || resp.hovered() || open {
+                // contains_pointer, not hovered: hovered() turns false while the pointer is on the
+                // row's own Quit buttons, which would hide them under the cursor.
+                let over_row = resp.contains_pointer();
+                if highlighted || over_row || open {
                     ui.painter().rect_filled(rect, 12.0, hover_fill);
                 }
                 let inner = rect.shrink2(Vec2::new(14.0, 8.0));
@@ -315,12 +327,12 @@ impl PulseApp {
                         let procs = if a.process_count == 1 { "1 process".to_string() } else { format!("{} processes", a.process_count) };
                         ui.label(RichText::new(procs).size(12.5).weak());
                     });
-                    if (resp.hovered() || open || highlighted) && a.key != crate::grouping::SYSTEM_KEY {
+                    if (over_row || open || highlighted) && a.key != crate::grouping::SYSTEM_KEY {
                         ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
-                            if ui.small_button(self.i18n.t("force_quit") + "…").clicked() {
+                            if widgets::icon_button(ui, ActionIcon::ForceQuit, danger, &(self.i18n.t("force_quit") + "…")).clicked() {
                                 action = Some((Target::App(a.key.clone()), Mode::ForceQuit));
                             }
-                            if ui.small_button(self.i18n.t("quit") + "…").clicked() {
+                            if widgets::icon_button(ui, ActionIcon::Quit, strong, &(self.i18n.t("quit") + "…")).clicked() {
                                 action = Some((Target::App(a.key.clone()), Mode::Quit));
                             }
                         });
@@ -336,13 +348,18 @@ impl PulseApp {
                 }
                 if open {
                     let mut procs: Vec<&Process> = a.pids.iter().filter_map(|p| snap.process(*p)).collect();
-                    procs.sort_by(|x, y| match m {
+                    let frozen_pids = self.frozen.as_ref().filter(|f| f.metric == m).and_then(|f| f.procs.get(&a.key));
+                    if let Some(order) = frozen_pids {
+                        let pos = |pid: i32| order.iter().position(|x| *x == pid).unwrap_or(usize::MAX);
+                        procs.sort_by_key(|p| pos(p.pid));
+                    } else { procs.sort_by(|x, y| match m {
                         RankMetric::Cpu => y.cpu_pct.total_cmp(&x.cpu_pct),
                         RankMetric::Energy => y.energy_w.total_cmp(&x.energy_w),
                         RankMetric::Disk => (y.disk_read_bps + y.disk_write_bps).total_cmp(&(x.disk_read_bps + x.disk_write_bps)),
                         RankMetric::Network => (y.net_rx_bps + y.net_tx_bps).total_cmp(&(x.net_rx_bps + x.net_tx_bps)),
                         _ => y.mem_bytes.cmp(&x.mem_bytes),
-                    });
+                    }); }
+                    shown_procs.insert(a.key.clone(), procs.iter().take(200).map(|p| p.pid).collect());
                     ui.indent(a.key.clone(), |ui| {
                         egui::Grid::new(format!("helpers-{}", a.key)).striped(true).num_columns(7).spacing([16.0, 4.0]).show(ui, |ui| {
                             for h in ["Process", "PID", "CPU", "Memory", "Energy", "", ""] {
@@ -358,7 +375,7 @@ impl PulseApp {
                                 if ui.small_button("Inspect").clicked() {
                                     inspect = Some(p.pid);
                                 }
-                                if ui.small_button(self.i18n.t("quit") + "…").clicked() {
+                                if widgets::icon_button(ui, ActionIcon::Quit, strong, &(self.i18n.t("quit") + "…")).clicked() {
                                     action = Some((Target::Pid(p.pid), Mode::Quit));
                                 }
                                 ui.end_row();
@@ -369,6 +386,9 @@ impl PulseApp {
                 }
             }
         });
+        // A confirmation dialog on top of the list doesn't count as hovering it.
+        let over_list = ui.rect_contains_pointer(card.response.rect) && self.confirm.is_none() && action.is_none();
+        self.frozen = over_list.then_some(FrozenOrder { metric: m, apps: shown_apps, procs: shown_procs });
         ui.add_space(14.0);
         if let Some(dark) = export {
             let card = crate::cli::card_for(snap, m, &self.settings, dark);

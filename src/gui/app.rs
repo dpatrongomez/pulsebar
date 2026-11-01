@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 use eframe::egui::{self, Align, Color32, Rect, RichText, Vec2};
 
 use super::icons::Icons;
-use super::widgets::{self, Palette};
+use super::widgets::{self, ActionIcon, Palette};
 use super::{Nav, show_app};
 use crate::actions::{self, HumanYes, Mode, PendingRequest, Plan, Target};
 use crate::daemon::Shared;
@@ -132,9 +132,19 @@ pub struct PulseApp {
     nav_seen: i64,
     last_nav_poll: Instant,
     expanded: HashMap<String, bool>,
+    frozen: Option<FrozenOrder>,
     started: Option<Instant>,
     screenshot_requested: bool,
     series_cache: HashMap<String, (Instant, Vec<f64>)>,
+}
+
+/// Row order of the app list while the pointer is over it. Without this a refresh can re-rank
+/// the list between hover and click and slide another app's Quit button under the cursor
+/// (egui identifies those buttons by position).
+struct FrozenOrder {
+    metric: RankMetric,
+    apps: Vec<String>,
+    procs: HashMap<String, Vec<i32>>,
 }
 
 fn local_midnight() -> i64 {
@@ -161,6 +171,7 @@ impl PulseApp {
             nav_seen: std::fs::read(paths::nav_file()).ok().and_then(|b| serde_json::from_slice::<Nav>(&b).ok()).map(|n| n.at_ms).unwrap_or(0),
             last_nav_poll: Instant::now(),
             expanded: HashMap::new(),
+            frozen: None,
             started: None,
             screenshot_requested: false,
             series_cache: HashMap::new(),

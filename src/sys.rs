@@ -438,6 +438,22 @@ pub fn pid_alive(pid: i32) -> bool {
     unsafe { libc::kill(pid, 0) == 0 }
 }
 
+/// Performance / efficiency logical core counts on Apple silicon (`hw.perflevel{0,1}`),
+/// read once. `None` on Intel or when the keys don't exist.
+pub fn perf_levels() -> Option<(usize, usize)> {
+    static CACHE: std::sync::OnceLock<Option<(usize, usize)>> = std::sync::OnceLock::new();
+    *CACHE.get_or_init(|| {
+        let read = |name: &str| -> Option<usize> {
+            let c = std::ffi::CString::new(name).ok()?;
+            let mut v: i32 = 0;
+            let mut len = std::mem::size_of::<i32>();
+            let r = unsafe { libc::sysctlbyname(c.as_ptr(), &mut v as *mut _ as *mut libc::c_void, &mut len, std::ptr::null_mut(), 0) };
+            (r == 0).then_some(v as usize)
+        };
+        Some((read("hw.perflevel0.logicalcpu")?, read("hw.perflevel1.logicalcpu").unwrap_or(0)))
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

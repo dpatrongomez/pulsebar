@@ -3,6 +3,7 @@
 //! * `run_window` — the egui window, launched on demand and exiting when closed.
 
 mod app;
+mod dialog;
 mod icons;
 pub mod tray;
 mod widgets;

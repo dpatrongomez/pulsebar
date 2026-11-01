@@ -45,6 +45,18 @@ impl Sparklines {
             }
         }
     }
+    /// Fill from the last 10 minutes of 1-second history buckets.
+    pub fn seed(&mut self, h: &History, now: i64) {
+        for k in MetricKind::ALL {
+            let Ok(rows) = h.series(k.as_str(), None, now - 600, now, now) else { continue };
+            let q = self.series.entry(k).or_default();
+            q.extend(rows.iter().map(|b| b.value_avg));
+            while q.len() > Self::LEN {
+                q.pop_front();
+            }
+        }
+    }
+
     pub fn get(&self, k: MetricKind) -> Vec<f64> {
         self.series.get(&k).map(|q| q.iter().copied().collect()).unwrap_or_default()
     }
@@ -109,10 +121,17 @@ fn mtime(p: &std::path::Path) -> Option<SystemTime> {
 
 pub fn spawn(settings: Settings, role: Role) -> Arc<Shared> {
     let history = History::open(&paths::database_file()).ok();
+    // A freshly opened window starts with the agent's recent history so the Overview bars
+    // aren't empty for the first two minutes.
+    let mut sparks = Sparklines::default();
+    if role == Role::Window
+        && let Some(h) = history.as_ref() {
+            sparks.seed(h, crate::sys::now_s());
+        }
     let shared = Arc::new(Shared {
         role,
         snapshot: RwLock::new(None),
-        sparks: RwLock::new(Sparklines::default()),
+        sparks: RwLock::new(sparks),
         alerts: Mutex::new(read_alerts()),
         settings: RwLock::new(settings.clone()),
         foreground: AtomicBool::new(role == Role::Window),
@@ -126,7 +145,10 @@ pub fn spawn(settings: Settings, role: Role) -> Arc<Shared> {
 
 /// Metrics written to history per tick (whole machine) and per app.
 pub fn history_samples(s: &Snapshot) -> (Vec<(String, f64)>, Vec<(String, String, f64)>) {
-    let machine: Vec<(String, f64)> = s.frames.iter().filter(|f| f.available).map(|f| (f.metric_kind.as_str().to_string(), f.value)).collect();
+    let mut machine: Vec<(String, f64)> = s.frames.iter().filter(|f| f.available).map(|f| (f.metric_kind.as_str().to_string(), f.value)).collect();
+    // Separate series for the Overview's "Written today" / "Downloaded" totals.
+    machine.push(("disk_write".into(), s.machine.disk.write_bps));
+    machine.push(("net_down".into(), s.machine.network.rx_bps));
     let mut apps = Vec::new();
     for m in [RankMetric::Cpu, RankMetric::Memory, RankMetric::Energy] {
         for a in s.top_apps(m, 15) {

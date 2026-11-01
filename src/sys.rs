@@ -95,15 +95,43 @@ fn timebase_ns_per_tick() -> f64 {
     })
 }
 
+/// `struct rusage_info_v6` from <sys/resource.h> (macOS 12+); the libc crate stops at v4.
+/// v6 adds `ri_energy_nj`, the energy the process itself used. v4's `ri_billed_energy` only
+/// counts energy other processes billed to it, which is near zero for most apps.
+#[cfg(target_os = "macos")]
+#[repr(C)]
+struct RUsageInfoV6 {
+    v4: libc::rusage_info_v4,
+    ri_flags: u64,
+    ri_user_ptime: u64,
+    ri_system_ptime: u64,
+    ri_pinstructions: u64,
+    ri_pcycles: u64,
+    ri_energy_nj: u64,
+    ri_penergy_nj: u64,
+    ri_secure_time_in_system: u64,
+    ri_secure_ptime_in_system: u64,
+    ri_neural_footprint: u64,
+    ri_lifetime_max_neural_footprint: u64,
+    ri_interval_max_neural_footprint: u64,
+    ri_reserved: [u64; 9],
+}
+
 #[cfg(target_os = "macos")]
 pub fn rusage(pid: i32) -> Option<RUsage> {
-    let mut ri: libc::rusage_info_v4 = unsafe { std::mem::zeroed() };
-    let r = unsafe {
-        libc::proc_pid_rusage(pid, libc::RUSAGE_INFO_V4, &mut ri as *mut _ as *mut libc::rusage_info_t)
+    const RUSAGE_INFO_V6: libc::c_int = 6;
+    let mut v6: RUsageInfoV6 = unsafe { std::mem::zeroed() };
+    let r = unsafe { libc::proc_pid_rusage(pid, RUSAGE_INFO_V6, &mut v6 as *mut _ as *mut libc::rusage_info_t) };
+    let (ri, energy_nj) = if r == 0 {
+        (v6.v4, v6.ri_energy_nj)
+    } else {
+        let mut ri: libc::rusage_info_v4 = unsafe { std::mem::zeroed() };
+        if unsafe { libc::proc_pid_rusage(pid, libc::RUSAGE_INFO_V4, &mut ri as *mut _ as *mut libc::rusage_info_t) } != 0 {
+            return None;
+        }
+        let billed = ri.ri_billed_energy;
+        (ri, billed)
     };
-    if r != 0 {
-        return None;
-    }
     // ri_user_time / ri_system_time are in mach absolute time units.
     let tb = timebase_ns_per_tick();
     Some(RUsage {
@@ -111,7 +139,7 @@ pub fn rusage(pid: i32) -> Option<RUsage> {
         system_s: ri.ri_system_time as f64 * tb / 1e9,
         phys_footprint: ri.ri_phys_footprint,
         peak_footprint: ri.ri_lifetime_max_phys_footprint,
-        energy_nj: ri.ri_billed_energy,
+        energy_nj,
         disk_read: ri.ri_diskio_bytesread,
         disk_written: ri.ri_diskio_byteswritten,
     })

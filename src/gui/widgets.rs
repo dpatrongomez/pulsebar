@@ -2,6 +2,7 @@
 
 use eframe::egui::{self, Color32, Pos2, Rect, RichText, Sense, Stroke, Vec2};
 
+use crate::model::MetricKind;
 use crate::settings::{NumberFont, Settings, Theme};
 
 #[derive(Clone, Copy)]
@@ -59,31 +60,6 @@ pub fn num(settings: &Settings, s: impl Into<String>, size: f32) -> RichText {
         NumberFont::Monospace => t.monospace(),
         NumberFont::Proportional => t,
     }
-}
-
-/// Sparkline; `max = None` scales to the series' own max.
-pub fn sparkline(ui: &mut egui::Ui, values: &[f64], size: Vec2, color: Color32, max: Option<f64>) -> egui::Response {
-    let (resp, painter) = ui.allocate_painter(size, Sense::hover());
-    let r = resp.rect;
-    if values.len() >= 2 {
-        let hi = max.unwrap_or_else(|| values.iter().cloned().fold(0.0, f64::max)).max(1e-9);
-        let n = values.len();
-        let pts: Vec<Pos2> = values
-            .iter()
-            .enumerate()
-            .map(|(i, v)| {
-                let x = r.left() + r.width() * i as f32 / (n - 1) as f32;
-                let y = r.bottom() - r.height() * (v / hi).clamp(0.0, 1.0) as f32;
-                Pos2::new(x, y)
-            })
-            .collect();
-        let mut fill = pts.clone();
-        fill.push(Pos2::new(r.right(), r.bottom()));
-        fill.push(Pos2::new(r.left(), r.bottom()));
-        painter.add(egui::Shape::convex_polygon(fill, color.gamma_multiply(0.15), Stroke::NONE));
-        painter.add(egui::Shape::line(pts, Stroke::new(1.5, color)));
-    }
-    resp
 }
 
 /// Line chart with min/max band for history buckets: (t, min, avg, max).
@@ -149,7 +125,122 @@ pub fn stacked_bar(ui: &mut egui::Ui, parts: &[(String, f64, Color32)], total: f
     resp.on_hover_text(tip.trim_end());
 }
 
+/// Card background for the current light/dark mode.
+pub fn card_fill(dark: bool) -> Color32 {
+    if dark { Color32::from_rgb(30, 30, 33) } else { Color32::WHITE }
+}
+
+/// Window background behind the cards.
+pub fn window_fill(dark: bool) -> Color32 {
+    if dark { Color32::from_rgb(20, 20, 22) } else { Color32::from_rgb(242, 242, 245) }
+}
+
 /// Card frame.
 pub fn card<R>(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
-    egui::Frame::group(ui.style()).corner_radius(10.0).inner_margin(12.0).show(ui, add).inner
+    egui::Frame::new().fill(card_fill(ui.visuals().dark_mode)).corner_radius(14.0).inner_margin(14.0).show(ui, add).inner
+}
+
+/// One hue per metric so each Overview card is recognisable at a glance. The colour-blind
+/// theme maps to Okabe–Ito hues and the monochrome theme to its accent.
+pub fn metric_color(theme: Theme, dark: bool, kind: MetricKind) -> Color32 {
+    match theme {
+        Theme::Monochrome => palette(theme, dark).accent,
+        Theme::ColorBlind => match kind {
+            MetricKind::Cpu | MetricKind::Sound => Color32::from_rgb(0, 114, 178),
+            MetricKind::Memory | MetricKind::Neural => Color32::from_rgb(204, 121, 167),
+            MetricKind::Gpu | MetricKind::Temperature => Color32::from_rgb(213, 94, 0),
+            MetricKind::Disk | MetricKind::Fans => Color32::from_rgb(230, 159, 0),
+            MetricKind::Network | MetricKind::Bluetooth => Color32::from_rgb(86, 180, 233),
+            MetricKind::Battery | MetricKind::Power => Color32::from_rgb(0, 158, 115),
+        },
+        Theme::Brand => match kind {
+            MetricKind::Cpu | MetricKind::Bluetooth => Color32::from_rgb(59, 130, 246),
+            MetricKind::Memory => Color32::from_rgb(139, 124, 246),
+            MetricKind::Gpu | MetricKind::Temperature => Color32::from_rgb(232, 72, 122),
+            MetricKind::Disk | MetricKind::Fans => Color32::from_rgb(224, 160, 40),
+            MetricKind::Network => Color32::from_rgb(34, 180, 110),
+            MetricKind::Battery | MetricKind::Power => Color32::from_rgb(52, 190, 80),
+            MetricKind::Neural => Color32::from_rgb(124, 108, 240),
+            MetricKind::Sound => Color32::from_rgb(236, 110, 60),
+        },
+    }
+}
+
+/// Vertical bar sparkline on a tinted rounded background; newest value on the right.
+/// `max = None` scales to the series' own max.
+pub fn bars(ui: &mut egui::Ui, values: &[f64], size: Vec2, color: Color32, max: Option<f64>) -> egui::Response {
+    let (resp, painter) = ui.allocate_painter(size, Sense::hover());
+    let r = resp.rect;
+    painter.rect_filled(r, 8.0, color.gamma_multiply(0.14));
+    let inner = r.shrink2(Vec2::new(8.0, 5.0));
+    let (bar_w, gap) = (4.0, 3.0);
+    let slots = ((inner.width() + gap) / (bar_w + gap)).floor().max(1.0) as usize;
+    let shown = &values[values.len().saturating_sub(slots)..];
+    let hi = max.unwrap_or_else(|| shown.iter().cloned().fold(0.0, f64::max)).max(1e-9);
+    // Right-align so the newest sample always sits at the right edge.
+    let x0 = inner.right() - shown.len() as f32 * (bar_w + gap) + gap;
+    for (i, v) in shown.iter().enumerate() {
+        let h = (inner.height() * (v / hi).clamp(0.0, 1.0) as f32).max(2.0);
+        let x = x0 + i as f32 * (bar_w + gap);
+        let bar = Rect::from_min_max(Pos2::new(x, inner.bottom() - h), Pos2::new(x + bar_w, inner.bottom()));
+        painter.rect_filled(bar, 1.5, color);
+    }
+    resp
+}
+
+/// Rounded square with a tinted background and a glyph in the metric colour.
+pub fn icon_badge(ui: &mut egui::Ui, glyph: &str, color: Color32, size: f32) {
+    let (r, _) = ui.allocate_exact_size(Vec2::splat(size), Sense::hover());
+    let p = ui.painter();
+    p.rect_filled(r, size * 0.28, color.gamma_multiply(0.2));
+    p.text(r.center(), egui::Align2::CENTER_CENTER, glyph, egui::FontId::proportional(size * 0.55), color);
+}
+
+/// Small rounded status pill ("✓ Normal").
+pub fn pill(ui: &mut egui::Ui, text: &str, color: Color32) {
+    let galley = ui.painter().layout_no_wrap(text.to_string(), egui::FontId::proportional(13.0), color);
+    let size = galley.size() + Vec2::new(18.0, 8.0);
+    let (r, _) = ui.allocate_exact_size(size, Sense::hover());
+    ui.painter().rect_filled(r, r.height() / 2.0, color.gamma_multiply(0.16));
+    ui.painter().galley(r.center() - galley.size() / 2.0, galley, color);
+}
+
+/// Coloured dot used in legends and stat labels.
+pub fn dot(ui: &mut egui::Ui, color: Color32) {
+    let (r, _) = ui.allocate_exact_size(Vec2::new(8.0, 8.0), Sense::hover());
+    ui.painter().circle_filled(r.center(), 3.5, color);
+}
+
+/// Ring chart: segments drawn clockwise from 12 o'clock with a small gap between them,
+/// two lines of text in the middle.
+pub fn donut(ui: &mut egui::Ui, diameter: f32, parts: &[(f64, Color32)], big: &str, small: &str) {
+    let (r, _) = ui.allocate_exact_size(Vec2::splat(diameter), Sense::hover());
+    let p = ui.painter();
+    let thickness = diameter * 0.12;
+    let radius = diameter / 2.0 - thickness / 2.0;
+    let c = r.center();
+    p.circle_stroke(c, radius, Stroke::new(thickness, ui.visuals().extreme_bg_color));
+    let total: f64 = parts.iter().map(|x| x.0.max(0.0)).sum();
+    if total > 0.0 {
+        let tau = std::f32::consts::TAU;
+        let gap = if parts.iter().filter(|x| x.0 > 0.0).count() > 1 { 0.03 } else { 0.0 };
+        let mut a = -tau / 4.0;
+        for (v, color) in parts {
+            let sweep = tau * (v.max(0.0) / total) as f32;
+            if sweep - gap > 0.002 {
+                let (a0, a1) = (a + gap / 2.0, a + sweep - gap / 2.0);
+                let steps = ((a1 - a0) / 0.04).ceil().max(2.0) as usize;
+                let pts: Vec<Pos2> = (0..=steps).map(|i| {
+                    let t = a0 + (a1 - a0) * i as f32 / steps as f32;
+                    c + Vec2::new(t.cos(), t.sin()) * radius
+                }).collect();
+                p.add(egui::Shape::line(pts, Stroke::new(thickness, *color)));
+            }
+            a += sweep;
+        }
+    }
+    let strong = ui.visuals().strong_text_color();
+    let weak = ui.visuals().weak_text_color();
+    p.text(c - Vec2::new(0.0, 7.0), egui::Align2::CENTER_CENTER, big, egui::FontId::proportional(diameter * 0.15), strong);
+    p.text(c + Vec2::new(0.0, diameter * 0.1), egui::Align2::CENTER_CENTER, small, egui::FontId::proportional(diameter * 0.1), weak);
 }

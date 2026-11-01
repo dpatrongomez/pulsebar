@@ -213,6 +213,18 @@ impl History {
         })
     }
 
+    /// Integral of a rate metric (bytes/s) since `since`: Σ bucket average × bucket length,
+    /// i.e. bytes transferred. Minutes the agent wasn't running count as zero.
+    pub fn total_since(&self, metric: &str, since: i64, now: i64) -> Result<f64> {
+        let res = if now - since <= 86_400 { 60 } else { Self::resolution_for(now, since) };
+        let s: Option<f64> = self.conn.query_row(
+            "SELECT SUM(vavg) FROM history WHERE res = ?1 AND metric = ?2 AND app = '' AND bucket >= ?3",
+            params![res, metric, since - since.rem_euclid(res)],
+            |r| r.get(0),
+        )?;
+        Ok(s.unwrap_or(0.0) * res as f64)
+    }
+
     pub fn row_count(&self) -> Result<i64> {
         Ok(self.conn.query_row("SELECT COUNT(*) FROM history", [], |r| r.get(0))?)
     }
@@ -299,6 +311,20 @@ mod tests {
         assert_eq!(h.row_count().unwrap(), 3 + 6);
         h.purge(now, 7 * 86_400).unwrap();
         assert_eq!(h.row_count().unwrap(), 6);
+    }
+
+    #[test]
+    fn total_since_integrates_rates() {
+        let mut h = History::open_in_memory().unwrap();
+        let t0 = 1_800_000_000;
+        // 1 MB/s for 10 minutes, then nothing recorded (agent not running).
+        for i in 0..600 {
+            h.record(t0 + i, &[Sample { app: None, metric: "net_down", value: 1e6 }]);
+        }
+        h.flush().unwrap();
+        let total = h.total_since("net_down", t0, t0 + 3600).unwrap();
+        assert!((total - 600e6).abs() < 1.0, "{total}");
+        assert_eq!(h.total_since("disk_write", t0, t0 + 3600).unwrap(), 0.0);
     }
 
     #[test]

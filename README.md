@@ -84,10 +84,11 @@ and nothing is stopped until a person clicks **Allow**.
 ## Tests
 
 ```sh
-cargo test                       # 49 tests
+cargo test                       # 50 tests
 UPDATE_GOLDEN=1 cargo test --test cli_golden   # accept intentional CLI output changes
 cargo clippy --all-targets       # clean
 cargo run --release --example tick_profile     # per-tick cost breakdown
+PULSEBAR_SCREENSHOT=/tmp/overview.png pulsebar window --tab overview   # save the window as PNG and quit
 ```
 
 Coverage: unit tests for every collector parser (ioreg/battery/Bluetooth/nettop/lsof/codesign

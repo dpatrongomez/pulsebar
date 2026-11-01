@@ -8,7 +8,7 @@ use std::sync::mpsc::{Receiver, channel};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use eframe::egui::{self, Align, Color32, RichText, Vec2};
+use eframe::egui::{self, Align, Color32, Rect, RichText, Vec2};
 
 use super::icons::Icons;
 use super::widgets::{self, Palette};
@@ -22,6 +22,83 @@ use crate::model::*;
 use crate::settings::{MenuDisplay, NumberFont, PlanConfig, Retention, Settings, Tab, Theme};
 use crate::units::{CpuUnit, DataUnit, TempUnit, format_duration};
 use crate::{docker, limits, output, paths, projects, share_card, sys};
+
+struct Stat {
+    label: String,
+    value: String,
+    dot: Option<Color32>,
+}
+
+enum Footer {
+    Bars(Vec<f64>, Option<f64>),
+    /// (label, remaining 0..1, pace) per AI plan.
+    Plans(Vec<(String, f64, PaceState)>),
+}
+
+/// One Overview metric tile.
+struct CardSpec {
+    tab: Tab,
+    kind: MetricKind,
+    title: String,
+    caption: String,
+    /// "54.59 GB": the last word is drawn smaller as the unit.
+    value: String,
+    badge: Option<(String, Color32)>,
+    stats: Vec<Stat>,
+    footer: Footer,
+}
+
+struct LegendRow {
+    name: String,
+    value: String,
+    weight: f64,
+    color: Color32,
+    bundle: Option<String>,
+}
+
+/// Donut + legend card.
+struct Breakdown3 {
+    tab: Tab,
+    glyph: &'static str,
+    title: String,
+    color: Color32,
+    big: String,
+    small: String,
+    rows: Vec<LegendRow>,
+}
+
+/// "54.59 GB" → ("54.59", "GB"); "72% left" → ("72%", "left"); "—" → ("—", "").
+fn split_unit(v: &str) -> (&str, &str) {
+    match v.rsplit_once(' ') {
+        Some((n, u)) if n.chars().any(|c| c.is_ascii_digit()) => (n, u),
+        _ => (v, ""),
+    }
+}
+
+fn tab_glyph(t: Tab) -> &'static str {
+    match t {
+        Tab::Overview => "⊞",
+        Tab::Cpu => "▣",
+        Tab::Memory => "☰",
+        Tab::Disk => "🖴",
+        Tab::Network => "🌐",
+        Tab::Gpu => "🖥",
+        Tab::Neural => "⚛",
+        Tab::Battery => "🔋",
+        Tab::Sound => "🔊",
+        Tab::Bluetooth => "📶",
+        Tab::Projects => "🗀",
+        Tab::Agents => "👾",
+        Tab::Containers => "📦",
+        Tab::History => "🕓",
+        Tab::Settings => "⚙",
+    }
+}
+
+/// Watts as "427 mW" below 1 W, else "1.7 W".
+fn format_power(w: f64) -> String {
+    if w < 1.0 { format!("{:.0} mW", w * 1000.0) } else { format!("{w:.1} W") }
+}
 
 struct InspectorState {
     detail: Option<ProcessDetail>,
@@ -53,6 +130,8 @@ pub struct PulseApp {
     nav_seen: i64,
     last_nav_poll: Instant,
     expanded: HashMap<String, bool>,
+    started: Option<Instant>,
+    screenshot_requested: bool,
 }
 
 fn local_midnight() -> i64 {
@@ -79,6 +158,8 @@ impl PulseApp {
             nav_seen: std::fs::read(paths::nav_file()).ok().and_then(|b| serde_json::from_slice::<Nav>(&b).ok()).map(|n| n.at_ms).unwrap_or(0),
             last_nav_poll: Instant::now(),
             expanded: HashMap::new(),
+            started: None,
+            screenshot_requested: false,
             shared,
             settings,
         };
@@ -87,6 +168,13 @@ impl PulseApp {
     }
 
     fn apply_style(&self, ctx: &egui::Context) {
+        for theme in [egui::Theme::Dark, egui::Theme::Light] {
+            ctx.style_mut_of(theme, |s| {
+                let fill = widgets::window_fill(theme == egui::Theme::Dark);
+                s.visuals.panel_fill = fill;
+                s.visuals.window_fill = widgets::card_fill(theme == egui::Theme::Dark);
+            });
+        }
         ctx.style_mut(|s| {
             if self.settings.compact {
                 s.spacing.item_spacing = Vec2::new(6.0, 3.0);
@@ -296,61 +384,426 @@ impl PulseApp {
         let u = self.settings.units;
         let m = &snap.machine;
         let sparks = self.shared.sparks.read().unwrap().clone();
+        let dark = ui.visuals().dark_mode;
+        let theme = self.settings.theme;
         let pal = self.pal(ui.ctx());
-        let limit = snap.plans.iter().filter(|p| p.pace_state != PaceState::Unknown).map(|p| 100.0 - p.used_pct).fold(f64::NAN, f64::min);
-        let tiles: Vec<(Tab, &str, String, String, MetricKind)> = vec![
-            (Tab::Cpu, "CPU", u.cpu(m.cpu.total_pct, m.cpu.core_count), format!("User {:.0} / System {:.0} · Load {:.2}", m.cpu.user_pct, m.cpu.system_pct, m.cpu.load_avg[0]), MetricKind::Cpu),
-            (Tab::Memory, "Memory", u.bytes(m.memory.used), format!("of {} · swap {}", u.bytes(m.memory.total), u.bytes(m.memory.swap_used)), MetricKind::Memory),
-            (Tab::Disk, "Disk free", m.disk.boot_free().map(|v| u.bytes(v.free)).unwrap_or("—".into()), format!("R {} · W {}", u.rate(m.disk.read_bps), u.rate(m.disk.write_bps)), MetricKind::Disk),
-            (Tab::Network, "Network", u.rate(m.network.rx_bps + m.network.tx_bps), format!("↓ {} ↑ {}", u.rate(m.network.rx_bps), u.rate(m.network.tx_bps)), MetricKind::Network),
-            (Tab::Gpu, "GPU", format!("{:.0} %", m.gpu.utilization_pct), m.gpu.name.clone(), MetricKind::Gpu),
-            (Tab::Neural, "Neural Engine", format!("{:.2} W", m.neural.power_w), if m.neural.available { format!("~{:.0} % load", m.neural.utilization_pct) } else { "not available".into() }, MetricKind::Neural),
-            (Tab::Battery, "Battery", if m.battery.present { format!("{:.0} %", m.battery.percent) } else { "AC".into() }, m.power.system_w.map(|w| format!("{w:.1} W system")).unwrap_or_default(), MetricKind::Battery),
-            (Tab::Agents, "Agents limit", if limit.is_nan() { "—".into() } else { format!("{limit:.0} % left") }, format!("{} sessions", snap.agents.len()), MetricKind::Cpu),
-            (Tab::Sound, "Sound", m.audio.output_volume.map(|v| format!("{:.0} %", v * 100.0)).unwrap_or("—".into()), m.audio.output_device.clone().unwrap_or_default(), MetricKind::Sound),
+        let col = |k: MetricKind| widgets::metric_color(theme, dark, k);
+        let now = sys::now_s();
+        let midnight = local_midnight();
+        let i18n = self.i18n.clone();
+        let t = |k: &str| i18n.t(k);
+        let dash = || "—".to_string();
+        let stat = |label: &str, value: String| Stat { label: label.to_string(), value, dot: None };
+
+        let cpu_today = self.today_stats("cpu");
+        let gpu_today = self.today_stats("gpu");
+        let ane_today = self.today_stats("neural");
+        let written_today = self.history_total("disk_write", midnight);
+        let net_today = self.history_total("net_down", midnight);
+        let net_week = self.history_total("net_down", now - 7 * 86_400);
+        let total_or_dash = |v: Option<f64>| v.filter(|v| *v > 0.0).map(|v| u.transferred(v as u64)).unwrap_or_else(dash);
+
+        // Memory pressure in the spirit of Activity Monitor: swapping or a nearly full RAM.
+        let mem = &m.memory;
+        let used_frac = mem.used as f64 / mem.total.max(1) as f64;
+        let (pressure, pressure_color) = if mem.swap_used > mem.total / 8 || used_frac > 0.95 {
+            ("High", pal.danger)
+        } else if mem.swap_used > 0 && used_frac > 0.85 {
+            ("Elevated", pal.warn)
+        } else {
+            ("Normal", col(MetricKind::Battery))
+        };
+        let (mem_app_c, mem_wired_c, mem_comp_c) = (col(MetricKind::Cpu), col(MetricKind::Sound), col(MetricKind::Network));
+
+        let boot = m.disk.boot_free();
+        let battery = &m.battery;
+        let mut cards = vec![
+            CardSpec {
+                tab: Tab::Cpu,
+                kind: MetricKind::Cpu,
+                title: t("tab.cpu"),
+                caption: t("now"),
+                value: u.cpu(m.cpu.total_pct, m.cpu.core_count),
+                badge: None,
+                stats: vec![
+                    stat("User", u.cpu(m.cpu.user_pct, m.cpu.core_count)),
+                    stat("System", u.cpu(m.cpu.system_pct, m.cpu.core_count)),
+                    stat(&t("avg_today"), cpu_today.map(|s| u.cpu(s.0, m.cpu.core_count)).unwrap_or_else(dash)),
+                ],
+                footer: Footer::Bars(sparks.get(MetricKind::Cpu), Some(100.0)),
+            },
+            CardSpec {
+                tab: Tab::Memory,
+                kind: MetricKind::Memory,
+                title: t("tab.memory"),
+                caption: format!("In Use of {}", u.bytes(mem.total)),
+                value: u.bytes(mem.used),
+                badge: Some((pressure.to_string(), pressure_color)),
+                stats: vec![
+                    Stat { label: "App".into(), value: u.bytes(mem.app), dot: Some(mem_app_c) },
+                    Stat { label: "Wired".into(), value: u.bytes(mem.wired), dot: Some(mem_wired_c) },
+                    Stat { label: "Compressed".into(), value: u.bytes(mem.compressed), dot: Some(mem_comp_c) },
+                ],
+                footer: Footer::Bars(sparks.get(MetricKind::Memory), Some(mem.total as f64)),
+            },
+            CardSpec {
+                tab: Tab::Gpu,
+                kind: MetricKind::Gpu,
+                title: t("tab.gpu"),
+                caption: if m.gpu.name.is_empty() { "GPU".into() } else { m.gpu.name.clone() },
+                value: format!("{:.0} %", m.gpu.utilization_pct),
+                badge: None,
+                stats: vec![
+                    stat("Memory", if m.gpu.vram_used > 0 { u.bytes(m.gpu.vram_used) } else { dash() }),
+                    stat("Average", gpu_today.map(|s| format!("{:.0}%", s.0)).unwrap_or_else(dash)),
+                    stat(&t("peak"), gpu_today.map(|s| format!("{:.0}%", s.1)).unwrap_or_else(dash)),
+                ],
+                footer: Footer::Bars(sparks.get(MetricKind::Gpu), Some(100.0)),
+            },
+            CardSpec {
+                tab: Tab::Disk,
+                kind: MetricKind::Disk,
+                title: t("tab.disk"),
+                caption: boot.map(|v| format!("Free of {}", u.bytes(v.total))).unwrap_or_else(|| "Free".into()),
+                value: boot.map(|v| u.bytes(v.free)).unwrap_or_else(dash),
+                badge: None,
+                stats: vec![
+                    stat("Reading", u.rate(m.disk.read_bps)),
+                    stat("Writing", u.rate(m.disk.write_bps)),
+                    stat("Written Today", total_or_dash(written_today)),
+                ],
+                footer: Footer::Bars(sparks.get(MetricKind::Disk), None),
+            },
+            CardSpec {
+                tab: Tab::Network,
+                kind: MetricKind::Network,
+                title: t("tab.network"),
+                caption: "Downloading".into(),
+                value: u.rate(m.network.rx_bps),
+                badge: None,
+                stats: vec![
+                    stat("Uploading", u.rate(m.network.tx_bps)),
+                    stat("Today", total_or_dash(net_today)),
+                    stat("Last 7 Days", total_or_dash(net_week)),
+                ],
+                footer: Footer::Bars(sparks.get(MetricKind::Network), None),
+            },
+            if battery.present {
+                CardSpec {
+                    tab: Tab::Battery,
+                    kind: MetricKind::Battery,
+                    title: t("tab.battery"),
+                    caption: if battery.charging { "Charging" } else if battery.on_ac { "On Power Adapter" } else { "On Battery" }.into(),
+                    value: format!("{:.0} %", battery.percent),
+                    badge: None,
+                    stats: vec![
+                        stat(if battery.charging { "Until Full" } else { "Remaining" }, battery.time_remaining_min.filter(|m| *m > 0).map(|m| format_duration(m * 60)).unwrap_or_else(dash)),
+                        stat("Power Draw", battery.power_w.map(f64::abs).or(m.power.system_w).map(|w| format!("{w:.1} W")).unwrap_or_else(dash)),
+                        stat("Health", battery.health_pct.map(|h| format!("{h:.0}%")).unwrap_or_else(dash)),
+                    ],
+                    footer: Footer::Bars(sparks.get(MetricKind::Battery), Some(100.0)),
+                }
+            } else {
+                CardSpec {
+                    tab: Tab::Battery,
+                    kind: MetricKind::Power,
+                    title: "Power".into(),
+                    caption: "System Power Draw".into(),
+                    value: m.power.system_w.map(|w| format!("{w:.1} W")).unwrap_or_else(dash),
+                    badge: None,
+                    stats: vec![
+                        stat("CPU", m.power.cpu_w.map(|w| format!("{w:.1} W")).unwrap_or_else(dash)),
+                        stat("GPU", m.power.gpu_w.map(|w| format!("{w:.1} W")).unwrap_or_else(dash)),
+                        stat("Neural", m.power.ane_w.map(|w| format!("{w:.2} W")).unwrap_or_else(dash)),
+                    ],
+                    footer: Footer::Bars(sparks.get(MetricKind::Power), None),
+                }
+            },
+            CardSpec {
+                tab: Tab::Neural,
+                kind: MetricKind::Neural,
+                title: "Neural Engine".into(),
+                caption: if m.neural.available { "Apple Neural Engine".into() } else { "Not available on this Mac".into() },
+                value: if m.neural.available { format!("{:.0} %", m.neural.utilization_pct) } else { dash() },
+                badge: None,
+                stats: vec![
+                    stat("Power", if m.neural.available { format!("{:.2} W", m.neural.power_w) } else { dash() }),
+                    stat("Average", ane_today.map(|s| format!("{:.0}%", s.0)).unwrap_or_else(dash)),
+                    stat(&t("peak"), ane_today.map(|s| format!("{:.0}%", s.1)).unwrap_or_else(dash)),
+                ],
+                footer: Footer::Bars(sparks.get(MetricKind::Neural), Some(100.0)),
+            },
         ];
-        let w = ((ui.available_width() - 24.0) / 3.0).max(200.0);
-        egui::Grid::new("tiles").num_columns(3).spacing([12.0, 12.0]).show(ui, |ui| {
-            for (i, (tab, label, value, sub, kind)) in tiles.into_iter().enumerate() {
-                let resp = ui
-                    .allocate_ui(Vec2::new(w, 110.0), |ui| {
-                        widgets::card(ui, |ui| {
-                            ui.set_width(w - 26.0);
-                            ui.label(RichText::new(label).weak());
-                            ui.label(widgets::num(&self.settings, value, 26.0).strong());
-                            ui.label(RichText::new(sub).small().weak());
-                            let fixed = matches!(kind, MetricKind::Cpu | MetricKind::Gpu).then_some(100.0);
-                            widgets::sparkline(ui, &sparks.get(kind), Vec2::new(w - 30.0, 22.0), pal.accent, fixed);
-                        })
-                    })
-                    .response
-                    .interact(egui::Sense::click());
-                if resp.clicked() {
-                    self.tab = tab;
-                }
-                if i % 3 == 2 {
-                    ui.end_row();
-                }
-            }
-        });
-        ui.add_space(8.0);
-        widgets::card(ui, |ui| {
-            ui.heading(self.i18n.t("busiest"));
+        cards.push(self.agents_card(snap, now));
+
+        let gap = 14.0;
+        let w4 = ((ui.available_width() - 3.0 * gap) / 4.0).floor().max(180.0);
+        let card_h = 214.0;
+        let mut go: Option<Tab> = None;
+        for row in cards.chunks(4) {
             ui.horizontal(|ui| {
-                for a in snap.top_apps(RankMetric::Cpu, 3) {
-                    ui.label(RichText::new(&a.app.name).strong());
-                    ui.label(widgets::num(&self.settings, u.cpu(a.cpu_pct, m.cpu.core_count), 14.0));
-                    ui.label(RichText::new(format!("· {}", u.bytes(a.mem_bytes))).weak());
-                    ui.add_space(16.0);
+                ui.spacing_mut().item_spacing.x = gap;
+                for c in row {
+                    if self.metric_card(ui, Vec2::new(w4, card_h), c) {
+                        go = Some(c.tab);
+                    }
                 }
             });
+            ui.add_space(gap - ui.spacing().item_spacing.y);
+        }
+
+        // Breakdown cards: memory by type, memory by app, power by app.
+        let w3 = ((ui.available_width() - 2.0 * gap) / 3.0).floor().max(240.0);
+        let gray = if dark { Color32::from_gray(110) } else { Color32::from_gray(170) };
+        let free_c = if dark { Color32::from_gray(60) } else { Color32::from_gray(215) };
+        let by_type = Breakdown3 {
+            tab: Tab::Memory,
+            glyph: "☰",
+            title: "Memory by Type".into(),
+            color: col(MetricKind::Cpu),
+            big: format!("{:.0}%", used_frac * 100.0),
+            small: "in use".into(),
+            rows: vec![
+                LegendRow { name: "App".into(), value: u.bytes(mem.app), weight: mem.app as f64, color: mem_app_c, bundle: None },
+                LegendRow { name: "Wired".into(), value: u.bytes(mem.wired), weight: mem.wired as f64, color: mem_wired_c, bundle: None },
+                LegendRow { name: "Compressed".into(), value: u.bytes(mem.compressed), weight: mem.compressed as f64, color: mem_comp_c, bundle: None },
+                LegendRow { name: "Cached".into(), value: u.bytes(mem.cached), weight: mem.cached as f64, color: gray, bundle: None },
+                LegendRow { name: "Free".into(), value: u.bytes(mem.free), weight: mem.free as f64, color: free_c, bundle: None },
+            ],
+        };
+        let mem_c = col(MetricKind::Memory);
+        let by_app = self.app_breakdown(snap, RankMetric::Memory, "Memory by App", "⊞", mem_c, Tab::Memory, &|v| u.bytes(v as u64), gray);
+        let pow_c = col(MetricKind::Battery);
+        let by_power = self.app_breakdown(snap, RankMetric::Energy, "Power by App", "⚡", pow_c, Tab::Battery, &format_power, gray);
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = gap;
+            for b in [by_type, by_app, by_power] {
+                if self.breakdown_card(ui, Vec2::new(w3, 196.0), &b) {
+                    go = Some(b.tab);
+                }
+            }
         });
+
         if let Some(b) = projects::idle_banner(&snap.projects) {
-            ui.add_space(6.0);
+            ui.add_space(10.0);
             if ui.add(egui::Button::new(RichText::new(format!("⚠ {b}")).color(pal.warn)).frame(false)).clicked() {
-                self.tab = Tab::Projects;
+                go = Some(Tab::Projects);
             }
         }
+        if let Some(tab) = go {
+            self.tab = tab;
+        }
+    }
+
+    /// The Agents card shows the plan closest to running out; the footer has one meter per plan.
+    fn agents_card(&self, snap: &Snapshot, now: i64) -> CardSpec {
+        let known: Vec<&AIPlan> = snap.plans.iter().filter(|p| p.pace_state != PaceState::Unknown).collect();
+        let tightest = known.iter().copied().min_by(|a, b| (100.0 - a.used_pct).total_cmp(&(100.0 - b.used_pct)));
+        let window = |w: &str| match w {
+            "week" | "7d" => "This week".to_string(),
+            "5h" => "5h window".to_string(),
+            other => other.to_string(),
+        };
+        let sessions = snap.agents.len().to_string();
+        let meters = known
+            .iter()
+            .take(4)
+            .map(|p| (format!("{} {}", p.provider, p.window), (100.0 - p.used_pct) / 100.0, p.pace_state))
+            .collect();
+        match tightest {
+            Some(p) => CardSpec {
+                tab: Tab::Agents,
+                kind: MetricKind::Bluetooth, // placeholder hue, replaced in metric_card
+                title: self.i18n.t("tab.agents"),
+                caption: [p.provider.as_str(), p.plan.as_str(), &window(&p.window)].iter().filter(|s| !s.is_empty()).cloned().collect::<Vec<_>>().join(" · "),
+                value: format!("{:.0}% left", (100.0 - p.used_pct).max(0.0)),
+                badge: None,
+                stats: vec![
+                    Stat { label: "Resets".into(), value: p.resets_at.map(|t| format_duration(t - now)).unwrap_or("—".into()), dot: None },
+                    Stat { label: "Sessions".into(), value: sessions, dot: None },
+                    Stat { label: "Pace".into(), value: if p.pace_text.is_empty() { "—".into() } else { p.pace_text.clone() }, dot: None },
+                ],
+                footer: Footer::Plans(meters),
+            },
+            None => CardSpec {
+                tab: Tab::Agents,
+                kind: MetricKind::Bluetooth,
+                title: self.i18n.t("tab.agents"),
+                caption: "No plan usage found".into(),
+                value: "—".into(),
+                badge: None,
+                stats: vec![
+                    Stat { label: "Sessions".into(), value: sessions, dot: None },
+                    Stat { label: "Working".into(), value: snap.agents.iter().filter(|a| a.state == AgentState::Working).count().to_string(), dot: None },
+                    Stat { label: "Memory".into(), value: self.settings.units.bytes(snap.agents.iter().map(|a| a.mem_bytes).sum()), dot: None },
+                ],
+                footer: Footer::Plans(vec![]),
+            },
+        }
+    }
+
+    /// Top four apps by `m` plus "Other", for a donut card.
+    #[allow(clippy::too_many_arguments)]
+    fn app_breakdown(&self, snap: &Snapshot, m: RankMetric, title: &str, glyph: &'static str, color: Color32, tab: Tab, fmt: &dyn Fn(f64) -> String, other_c: Color32) -> Breakdown3 {
+        let total: f64 = snap.apps.iter().map(|a| a.metric(m)).sum();
+        let top = snap.top_apps(m, 4);
+        let shades = [1.0, 0.75, 0.55, 0.4];
+        let mut rows: Vec<LegendRow> = top
+            .iter()
+            .enumerate()
+            .map(|(i, a)| LegendRow { name: a.app.name.clone(), value: fmt(a.metric(m)), weight: a.metric(m), color: color.gamma_multiply(shades[i]), bundle: a.app.bundle_path.clone() })
+            .collect();
+        let other = (total - rows.iter().map(|r| r.weight).sum::<f64>()).max(0.0);
+        rows.push(LegendRow { name: "Other".into(), value: fmt(other), weight: other, color: other_c, bundle: None });
+        Breakdown3 { tab, glyph, title: title.into(), color, big: fmt(total), small: "all apps".into(), rows }
+    }
+
+    fn card_frame(ui: &mut egui::Ui, size: Vec2) -> (egui::Response, Rect) {
+        let (rect, resp) = ui.allocate_exact_size(size, egui::Sense::click());
+        let dark = ui.visuals().dark_mode;
+        let mut fill = widgets::card_fill(dark);
+        if resp.hovered() {
+            fill = if dark { Color32::from_rgb(36, 36, 40) } else { Color32::from_rgb(250, 250, 252) };
+        }
+        ui.painter().rect_filled(rect, 16.0, fill);
+        (resp.on_hover_cursor(egui::CursorIcon::PointingHand), rect.shrink(16.0))
+    }
+
+    fn card_title(&self, ui: &mut egui::Ui, glyph: &str, title: &str, color: Color32, chevron: bool) {
+        ui.horizontal(|ui| {
+            widgets::icon_badge(ui, glyph, color, 26.0);
+            ui.add_space(4.0);
+            ui.label(RichText::new(title).size(15.0).color(color).strong());
+            if chevron {
+                ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| ui.label(RichText::new("›").size(16.0).weak()));
+            }
+        });
+    }
+
+    /// One Overview tile. Returns true when clicked.
+    fn metric_card(&self, ui: &mut egui::Ui, size: Vec2, c: &CardSpec) -> bool {
+        let (resp, inner) = Self::card_frame(ui, size);
+        let dark = ui.visuals().dark_mode;
+        let pal = self.pal(ui.ctx());
+        let color = if c.tab == Tab::Agents { widgets::metric_color(self.settings.theme, dark, MetricKind::Memory) } else { widgets::metric_color(self.settings.theme, dark, c.kind) };
+        let glyph = if c.kind == MetricKind::Power { "⚡" } else { tab_glyph(c.tab) };
+        // A child Ui paints inside the card without allocating space in the row again.
+        ui.new_child(egui::UiBuilder::new().max_rect(inner).layout(egui::Layout::top_down(Align::Min))).scope(|ui| {
+            ui.style_mut().interaction.selectable_labels = false;
+            ui.spacing_mut().item_spacing.y = 4.0;
+            self.card_title(ui, glyph, &c.title, color, true);
+            ui.add_space(8.0);
+            ui.label(RichText::new(&c.caption).size(12.5).weak());
+            let (num, unit) = split_unit(&c.value);
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 5.0;
+                ui.with_layout(egui::Layout::left_to_right(Align::Max), |ui| {
+                    ui.label(widgets::num(&self.settings, num, 32.0).strong().color(ui.visuals().strong_text_color()));
+                    if !unit.is_empty() {
+                        ui.label(RichText::new(unit).size(17.0).weak());
+                    }
+                    if let Some((text, col)) = &c.badge {
+                        ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| widgets::pill(ui, text, *col));
+                    }
+                });
+            });
+            ui.add_space(6.0);
+            let col_w = inner.width() / 3.0;
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 0.0;
+                for s in &c.stats {
+                    ui.allocate_ui_with_layout(Vec2::new(col_w, 36.0), egui::Layout::top_down(Align::Min), |ui| {
+                        ui.set_width(col_w);
+                        ui.spacing_mut().item_spacing.y = 2.0;
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.x = 3.0;
+                            if let Some(d) = s.dot {
+                                widgets::dot(ui, d);
+                            }
+                            ui.add(egui::Label::new(RichText::new(&s.label).size(12.0).weak()).truncate());
+                        });
+                        ui.add(egui::Label::new(widgets::num(&self.settings, s.value.clone(), 13.5).strong().color(ui.visuals().strong_text_color())).truncate());
+                    });
+                }
+            });
+            ui.add_space(6.0);
+            let footer = Vec2::new(inner.width(), (inner.bottom() - ui.cursor().top()).clamp(20.0, 40.0));
+            match &c.footer {
+                Footer::Bars(v, max) => {
+                    widgets::bars(ui, v, footer, color, *max);
+                }
+                Footer::Plans(plans) if !plans.is_empty() => {
+                    let slot = inner.width() / plans.len() as f32;
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 0.0;
+                        for (label, frac, pace) in plans {
+                            let c = match pace {
+                                PaceState::RunsOut => pal.danger,
+                                PaceState::Ahead => pal.warn,
+                                _ => color,
+                            };
+                            ui.allocate_ui_with_layout(Vec2::new(slot, footer.y), egui::Layout::top_down(Align::Min), |ui| {
+                                ui.spacing_mut().item_spacing.y = 3.0;
+                                ui.add(egui::Label::new(RichText::new(label).size(11.0).weak()).truncate());
+                                widgets::meter(ui, *frac, slot - 12.0, c);
+                            });
+                        }
+                    });
+                }
+                Footer::Plans(_) => {}
+            }
+        });
+        resp.clicked()
+    }
+
+    fn breakdown_card(&mut self, ui: &mut egui::Ui, size: Vec2, b: &Breakdown3) -> bool {
+        let (resp, inner) = Self::card_frame(ui, size);
+        // A child Ui paints inside the card without allocating space in the row again.
+        ui.new_child(egui::UiBuilder::new().max_rect(inner).layout(egui::Layout::top_down(Align::Min))).scope(|ui| {
+            ui.style_mut().interaction.selectable_labels = false;
+            self.card_title(ui, b.glyph, &b.title, b.color, false);
+            ui.add_space(10.0);
+            ui.horizontal(|ui| {
+                let d = (inner.bottom() - ui.cursor().top()).clamp(90.0, 128.0);
+                let parts: Vec<(f64, Color32)> = b.rows.iter().map(|r| (r.weight, r.color)).collect();
+                widgets::donut(ui, d, &parts, &b.big, &b.small);
+                ui.add_space(14.0);
+                ui.vertical(|ui| {
+                    ui.spacing_mut().item_spacing.y = 6.0;
+                    for r in &b.rows {
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.x = 6.0;
+                            widgets::dot(ui, r.color);
+                            if let Some(t) = r.bundle.as_deref().and_then(|p| self.icons.get(ui.ctx(), Some(p))) {
+                                ui.image((t, Vec2::splat(16.0)));
+                            }
+                            // Leave room for the value so long names truncate instead of colliding.
+                            let value_w = ui.painter().layout_no_wrap(r.value.clone(), egui::FontId::proportional(13.5), Color32::WHITE).size().x;
+                            let name_w = (ui.available_width() - value_w - 10.0).max(40.0);
+                            ui.allocate_ui_with_layout(Vec2::new(name_w, 18.0), egui::Layout::left_to_right(Align::Center), |ui| {
+                                ui.set_width(name_w);
+                                ui.add(egui::Label::new(RichText::new(&r.name).size(13.5)).truncate());
+                            });
+                            ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
+                                ui.label(widgets::num(&self.settings, r.value.clone(), 13.5).weak());
+                            });
+                        });
+                    }
+                });
+            });
+        });
+        resp.clicked()
+    }
+
+    fn history_total(&mut self, metric: &str, since: i64) -> Option<f64> {
+        let key = format!("total:{metric}:{}", since / 3600);
+        if let Some((t, v)) = self.today.get(&key)
+            && t.elapsed() < Duration::from_secs(30) {
+                return v.map(|x| x.0);
+            }
+        let v = self.shared.history.lock().ok().and_then(|h| h.as_ref().and_then(|h| h.total_since(metric, since, sys::now_s()).ok()));
+        self.today.insert(key, (Instant::now(), v.map(|x| (x, x))));
+        v
     }
 
     fn cpu(&mut self, ui: &mut egui::Ui, snap: &Arc<Snapshot>) {
@@ -1168,6 +1621,33 @@ impl PulseApp {
     }
 }
 
+impl PulseApp {
+    /// `PULSEBAR_SCREENSHOT=/path.png`: capture the window after a few seconds, save, quit.
+    /// Reads our own framebuffer, so it needs no screen-recording permission.
+    fn debug_screenshot(&mut self, ctx: &egui::Context) {
+        let Some(path) = std::env::var_os("PULSEBAR_SCREENSHOT") else { return };
+        let started = *self.started.get_or_insert_with(Instant::now);
+        let shot = ctx.input(|i| {
+            i.raw.events.iter().find_map(|e| match e {
+                egui::Event::Screenshot { image, .. } => Some(image.clone()),
+                _ => None,
+            })
+        });
+        if let Some(img) = shot {
+            let [w, h] = img.size;
+            let raw: Vec<u8> = img.pixels.iter().flat_map(|c| c.to_array()).collect();
+            if let Some(buf) = image::RgbaImage::from_raw(w as u32, h as u32, raw) {
+                let _ = buf.save(&path);
+            }
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        } else if started.elapsed() > Duration::from_secs(8) && !self.screenshot_requested {
+            self.screenshot_requested = true;
+            ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(Default::default()));
+        }
+        ctx.request_repaint_after(Duration::from_millis(200));
+    }
+}
+
 impl eframe::App for PulseApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // Closing the window ends this process; the menu bar agent keeps running.
@@ -1185,6 +1665,7 @@ impl eframe::App for PulseApp {
         self.toasts.retain(|(t, _)| t.elapsed() < Duration::from_secs(6));
         ctx.request_repaint_after(Duration::from_millis(1000));
 
+        self.debug_screenshot(ctx);
         let snap = self.shared.snapshot.read().unwrap().clone();
         let Some(snap) = snap else {
             egui::CentralPanel::default().show(ctx, |ui| {
@@ -1193,18 +1674,29 @@ impl eframe::App for PulseApp {
             return;
         };
 
-        egui::TopBottomPanel::top("tabs").show(ctx, |ui| {
-            ui.add_space(4.0);
-            ui.horizontal_wrapped(|ui| {
-                let tabs = self.settings.tabs.clone();
-                for t in tabs.iter().filter(|t| t.visible) {
-                    if ui.selectable_label(self.tab == t.tab, self.i18n.t(t.tab.key())).clicked() {
-                        self.tab = t.tab;
-                        self.highlight = None;
+        egui::TopBottomPanel::top("tabs").show_separator_line(false).show(ctx, |ui| {
+            ui.add_space(8.0);
+            let dark = ui.visuals().dark_mode;
+            let strip = if dark { Color32::from_rgb(28, 28, 31) } else { Color32::from_rgb(230, 230, 235) };
+            let accent = widgets::metric_color(self.settings.theme, dark, MetricKind::Cpu);
+            egui::Frame::new().fill(strip).corner_radius(12.0).inner_margin(4.0).show(ui, |ui| {
+                ui.horizontal_wrapped(|ui| {
+                    ui.spacing_mut().item_spacing.x = 2.0;
+                    let tabs = self.settings.tabs.clone();
+                    for t in tabs.iter().filter(|t| t.visible) {
+                        let selected = self.tab == t.tab;
+                        let text = RichText::new(format!("{}  {}", tab_glyph(t.tab), self.i18n.t(t.tab.key()))).size(13.0);
+                        let text = if selected { text.color(accent) } else { text };
+                        let fill = if selected { accent.gamma_multiply(0.18) } else { Color32::TRANSPARENT };
+                        let b = egui::Button::new(text).fill(fill).stroke(egui::Stroke::NONE).corner_radius(9.0).min_size(Vec2::new(0.0, 30.0));
+                        if ui.add(b).clicked() {
+                            self.tab = t.tab;
+                            self.highlight = None;
+                        }
                     }
-                }
+                });
             });
-            ui.add_space(2.0);
+            ui.add_space(6.0);
         });
         if !self.toasts.is_empty() {
             egui::TopBottomPanel::bottom("toasts").show(ctx, |ui| {

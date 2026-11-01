@@ -54,6 +54,20 @@ fn pct(v: Option<f64>) -> String {
     v.map(|x| format!("{x:.0}%")).unwrap_or("—".into())
 }
 
+/// Sub-list layout: process names start under the app name; the four numeric columns
+/// (PID, CPU, Memory, Energy) are right-aligned at these x positions; the row actions
+/// (Inspect, Quit) live in the reserved strip at the far right.
+const SUB_INDENT: f32 = 46.0;
+const SUB_ACTIONS_W: f32 = 58.0;
+
+fn sub_columns(inner: Rect) -> [f32; 4] {
+    let energy = inner.right() - SUB_ACTIONS_W - 8.0;
+    let memory = energy - 84.0;
+    let cpu = memory - 84.0;
+    let pid = cpu - 64.0;
+    [pid, cpu, memory, energy]
+}
+
 fn watts(v: Option<f64>) -> String {
     v.map(|w| if w < 1.0 { format!("{:.0} mW", w * 1000.0) } else { format!("{w:.1} W") }).unwrap_or("—".into())
 }
@@ -360,28 +374,55 @@ impl PulseApp {
                         _ => y.mem_bytes.cmp(&x.mem_bytes),
                     }); }
                     shown_procs.insert(a.key.clone(), procs.iter().take(200).map(|p| p.pid).collect());
-                    ui.indent(a.key.clone(), |ui| {
-                        egui::Grid::new(format!("helpers-{}", a.key)).striped(true).num_columns(7).spacing([16.0, 4.0]).show(ui, |ui| {
-                            for h in ["Process", "PID", "CPU", "Memory", "Energy", "", ""] {
-                                ui.label(RichText::new(h).small().weak());
-                            }
-                            ui.end_row();
-                            for p in procs.iter().take(200) {
-                                ui.label(&p.name);
-                                ui.label(RichText::new(p.pid.to_string()).weak());
-                                ui.label(u.cpu(p.cpu_pct, cores));
-                                ui.label(u.bytes(p.mem_bytes));
-                                ui.label(watts(Some(p.energy_w)));
-                                if ui.small_button("Inspect").clicked() {
-                                    inspect = Some(p.pid);
-                                }
-                                if widgets::icon_button(ui, ActionIcon::Quit, strong, &(self.i18n.t("quit") + "…")).clicked() {
+                    // Painter-drawn sub-list: rows span the same width as the app rows, numeric
+                    // columns are right-aligned at fixed offsets from the right edge, and the
+                    // row actions show only while the pointer is over the row.
+                    let weak = ui.visuals().weak_text_color();
+                    let text_col = ui.visuals().text_color();
+                    let (hdr, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 24.0), egui::Sense::hover());
+                    let hin = hdr.shrink2(Vec2::new(14.0, 0.0));
+                    let cols = sub_columns(hin);
+                    let hfont = egui::FontId::proportional(11.5);
+                    ui.painter().text(egui::pos2(hin.left() + SUB_INDENT, hin.center().y + 2.0), egui::Align2::LEFT_CENTER, "Process", hfont.clone(), weak);
+                    for (x, label) in cols.iter().zip(["PID", "CPU", "Memory", "Energy"]) {
+                        ui.painter().text(egui::pos2(*x, hin.center().y + 2.0), egui::Align2::RIGHT_CENTER, label, hfont.clone(), weak);
+                    }
+                    ui.painter().hline(hin.x_range(), hdr.bottom(), egui::Stroke::new(1.0, ui.visuals().widgets.noninteractive.bg_stroke.color.gamma_multiply(0.6)));
+                    let (quit_tip, inspect_tip) = (self.i18n.t("quit") + "…", self.i18n.t("inspect"));
+                    let font = egui::FontId::proportional(13.5);
+                    for p in procs.iter().take(200) {
+                        let (rect, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 34.0), egui::Sense::hover());
+                        // contains_pointer, not hovered: hovered() is false while the pointer is on
+                        // the row's own buttons, which would hide them under the cursor.
+                        let over = resp.contains_pointer();
+                        if over {
+                            ui.painter().rect_filled(rect, 10.0, hover_fill);
+                        }
+                        let inner = rect.shrink2(Vec2::new(14.0, 0.0));
+                        let cols = sub_columns(inner);
+                        let cy = inner.center().y;
+                        let name_x = inner.left() + SUB_INDENT;
+                        let mut job = egui::text::LayoutJob::simple_singleline(p.name.clone(), font.clone(), text_col);
+                        job.wrap = egui::text::TextWrapping { max_width: (cols[0] - 40.0 - name_x).max(20.0), max_rows: 1, break_anywhere: true, overflow_character: Some('…') };
+                        let galley = ui.painter().layout_job(job);
+                        ui.painter().galley(egui::pos2(name_x, cy - galley.size().y / 2.0), galley, text_col);
+                        let cells = [p.pid.to_string(), u.cpu(p.cpu_pct, cores), u.bytes(p.mem_bytes), watts(Some(p.energy_w))];
+                        for (i, (x, text)) in cols.iter().zip(cells).enumerate() {
+                            ui.painter().text(egui::pos2(*x, cy), egui::Align2::RIGHT_CENTER, text, font.clone(), if i == 0 { weak } else { text_col });
+                        }
+                        if over {
+                            let actions = Rect::from_min_max(egui::pos2(inner.right() - SUB_ACTIONS_W, rect.top()), egui::pos2(inner.right(), rect.bottom()));
+                            ui.new_child(egui::UiBuilder::new().id_salt(("proc-actions", p.pid)).max_rect(actions).layout(egui::Layout::right_to_left(Align::Center))).scope(|ui| {
+                                ui.spacing_mut().item_spacing.x = 2.0;
+                                if widgets::icon_button(ui, ActionIcon::Quit, strong, &quit_tip).clicked() {
                                     action = Some((Target::Pid(p.pid), Mode::Quit));
                                 }
-                                ui.end_row();
-                            }
-                        });
-                    });
+                                if widgets::icon_button(ui, ActionIcon::Inspect, strong, &inspect_tip).clicked() {
+                                    inspect = Some(p.pid);
+                                }
+                            });
+                        }
+                    }
                     ui.add_space(6.0);
                 }
             }

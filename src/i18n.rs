@@ -30,6 +30,7 @@ const TABLE: &[Row] = &[
     ("busiest",        ["Busiest Right Now","Más activas ahora","Gerade am aktivsten","Les plus actives","Più attive ora","Nu het drukst","Mais ativos agora","Mest aktiva nu","Найактивніші зараз","現在最も負荷が高い","지금 가장 바쁜 앱","当前最繁忙"]),
     ("quit",           ["Quit","Salir","Beenden","Quitter","Esci","Stop","Encerrar","Avsluta","Завершити","終了","종료","退出"]),
     ("force_quit",     ["Force Quit","Forzar salida","Sofort beenden","Forcer à quitter","Uscita forzata","Forceer stop","Forçar encerrar","Tvångsavsluta","Примусово завершити","強制終了","강제 종료","强制退出"]),
+    ("inspect",        ["Inspect","Inspeccionar","Untersuchen","Inspecter","Ispeziona","Inspecteren","Inspecionar","Inspektera","Переглянути","調査","검사","检查"]),
     ("cancel",         ["Cancel","Cancelar","Abbrechen","Annuler","Annulla","Annuleer","Cancelar","Avbryt","Скасувати","キャンセル","취소","取消"]),
     ("stop",           ["Stop…","Detener…","Stoppen…","Arrêter…","Ferma…","Stoppen…","Parar…","Stoppa…","Зупинити…","停止…","중지…","停止…"]),
     ("stop_all",       ["Stop All…","Detener todo…","Alle stoppen…","Tout arrêter…","Ferma tutto…","Alles stoppen…","Parar tudo…","Stoppa alla…","Зупинити все…","すべて停止…","모두 중지…","全部停止…"]),

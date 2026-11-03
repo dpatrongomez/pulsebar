@@ -137,6 +137,10 @@ pub struct PulseApp {
     started: Option<Instant>,
     screenshot_requested: bool,
     series_cache: HashMap<String, (Instant, Vec<f64>)>,
+    /// Search query per tab (kept while the window is open).
+    search: HashMap<Tab, String>,
+    /// Set by ⌘F; the visible app list's search field takes focus on the next paint.
+    focus_search: bool,
 }
 
 /// Row order of the app list while the pointer is over it. Without this a refresh can re-rank
@@ -146,6 +150,8 @@ struct FrozenOrder {
     metric: RankMetric,
     apps: Vec<String>,
     procs: HashMap<String, Vec<i32>>,
+    /// Search query the order was captured under; a different query invalidates it.
+    query: String,
 }
 
 fn local_midnight() -> i64 {
@@ -176,6 +182,8 @@ impl PulseApp {
             started: None,
             screenshot_requested: false,
             series_cache: HashMap::new(),
+            search: HashMap::new(),
+            focus_search: false,
             shared,
             settings,
         };
@@ -1203,6 +1211,10 @@ impl eframe::App for PulseApp {
         let focused = ctx.input(|i| i.viewport().focused.unwrap_or(true));
         self.shared.foreground.store(focused, Ordering::Relaxed);
         self.handle_nav();
+        // ⌘F focuses the search field of the current tab's app list.
+        if ctx.input_mut(|i| i.consume_shortcut(&egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::F))) {
+            self.focus_search = true;
+        }
         if self.last_pending_poll.elapsed() > Duration::from_secs(1) {
             let fresh = actions::list_pending();
             if !fresh.is_empty() && self.pending.is_empty() {
@@ -1275,6 +1287,8 @@ impl eframe::App for PulseApp {
                 Tab::Settings => self.settings_tab(ui, ctx),
             });
         });
+        // Tabs without an app list ignore ⌘F; don't let the request linger into the next tab.
+        self.focus_search = false;
         self.dialogs(ctx, &snap);
     }
 }

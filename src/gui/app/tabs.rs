@@ -309,6 +309,8 @@ impl PulseApp {
             for a in top {
                 shown_apps.push(a.key.clone());
                 let highlighted = self.highlight.as_deref() == Some(a.key.as_str());
+                // The focus ring marks the one selected row: the app itself, or one of its processes.
+                let selected_app = highlighted && self.sel_proc.is_none();
                 let open = *self.expanded.get(&a.key).unwrap_or(&false);
                 let (rect, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 58.0), egui::Sense::click());
                 // contains_pointer, not hovered: hovered() turns false while the pointer is on the
@@ -317,6 +319,14 @@ impl PulseApp {
                 if highlighted || over_row || open {
                     ui.painter().rect_filled(rect, 12.0, hover_fill);
                 }
+                if selected_app {
+                    ui.painter().rect_stroke(rect.shrink(1.0), 12.0, egui::Stroke::new(2.0, color), egui::StrokeKind::Inside);
+                    if self.scroll_to_sel {
+                        ui.scroll_to_rect(rect, None);
+                        self.scroll_to_sel = false;
+                    }
+                }
+                resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, selected_app, a.app.name.clone()));
                 let inner = rect.shrink2(Vec2::new(14.0, 8.0));
                 let meter_w = 240.0_f32.min(inner.width() * 0.3);
                 // Value and meter are painted at fixed positions on the right so every row lines up.
@@ -354,6 +364,8 @@ impl PulseApp {
                 });
                 if resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
                     self.expanded.insert(a.key.clone(), !open);
+                    self.highlight = Some(a.key.clone());
+                    self.sel_proc = None;
                 }
                 if highlighted && self.scroll_to_highlight {
                     ui.scroll_to_rect(rect, Some(Align::Center));
@@ -391,12 +403,25 @@ impl PulseApp {
                     let (quit_tip, inspect_tip) = (self.i18n.t("quit") + "…", self.i18n.t("inspect"));
                     let font = egui::FontId::proportional(13.5);
                     for p in procs.iter().take(200) {
-                        let (rect, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 34.0), egui::Sense::hover());
+                        let (rect, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 34.0), egui::Sense::click());
+                        let selected = highlighted && self.sel_proc == Some(p.pid);
+                        resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, selected, p.name.clone()));
+                        if resp.clicked() {
+                            self.highlight = Some(a.key.clone());
+                            self.sel_proc = Some(p.pid);
+                        }
                         // contains_pointer, not hovered: hovered() is false while the pointer is on
                         // the row's own buttons, which would hide them under the cursor.
                         let over = resp.contains_pointer();
-                        if over {
+                        if over || selected {
                             ui.painter().rect_filled(rect, 10.0, hover_fill);
+                        }
+                        if selected {
+                            ui.painter().rect_stroke(rect.shrink(1.0), 10.0, egui::Stroke::new(2.0, color), egui::StrokeKind::Inside);
+                            if self.scroll_to_sel {
+                                ui.scroll_to_rect(rect, None);
+                                self.scroll_to_sel = false;
+                            }
                         }
                         let inner = rect.shrink2(Vec2::new(14.0, 0.0));
                         let cols = sub_columns(inner);
@@ -410,7 +435,7 @@ impl PulseApp {
                         for (i, (x, text)) in cols.iter().zip(cells).enumerate() {
                             ui.painter().text(egui::pos2(*x, cy), egui::Align2::RIGHT_CENTER, text, font.clone(), if i == 0 { weak } else { text_col });
                         }
-                        if over {
+                        if over || selected {
                             let actions = Rect::from_min_max(egui::pos2(inner.right() - SUB_ACTIONS_W, rect.top()), egui::pos2(inner.right(), rect.bottom()));
                             ui.new_child(egui::UiBuilder::new().id_salt(("proc-actions", p.pid)).max_rect(actions).layout(egui::Layout::right_to_left(Align::Center))).scope(|ui| {
                                 ui.spacing_mut().item_spacing.x = 2.0;
@@ -427,6 +452,14 @@ impl PulseApp {
                 }
             }
         });
+        // Remember what is on screen so ↑ ↓ → ← can move through it.
+        self.list_rows = shown_apps
+            .iter()
+            .flat_map(|k| {
+                let procs = shown_procs.get(k).into_iter().flatten().map(|pid| Row::Proc { app: k.clone(), pid: *pid });
+                std::iter::once(Row::App(k.clone())).chain(procs)
+            })
+            .collect();
         // A confirmation dialog on top of the list doesn't count as hovering it.
         let over_list = ui.rect_contains_pointer(card.response.rect) && self.confirm.is_none() && action.is_none();
         self.frozen = over_list.then_some(FrozenOrder { metric: m, apps: shown_apps, procs: shown_procs });

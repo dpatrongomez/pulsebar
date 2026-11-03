@@ -46,6 +46,21 @@ impl MenuMetric {
             MenuMetric::Power => "Power",
         }
     }
+    /// i18n key of the metric's display name.
+    pub fn key(self) -> &'static str {
+        match self {
+            MenuMetric::Cpu => "mm.cpu",
+            MenuMetric::Memory => "mm.memory",
+            MenuMetric::Network => "mm.network",
+            MenuMetric::Disk => "mm.disk",
+            MenuMetric::Gpu => "mm.gpu",
+            MenuMetric::Neural => "mm.neural",
+            MenuMetric::Temperature => "mm.temperature",
+            MenuMetric::Fans => "mm.fans",
+            MenuMetric::Battery => "mm.battery",
+            MenuMetric::Power => "mm.power",
+        }
+    }
     /// Default red-tint threshold (in the metric's natural unit).
     pub fn default_threshold(self) -> Option<f64> {
         match self {

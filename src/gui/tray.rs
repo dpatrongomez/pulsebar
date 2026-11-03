@@ -14,6 +14,7 @@ use tray_icon::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tray_icon::{Icon, TrayIcon, TrayIconBuilder};
 
 use crate::daemon::Shared;
+use crate::i18n::I18n;
 use crate::model::{MetricKind, RankMetric, Snapshot};
 use crate::output::metric_value;
 use crate::settings::{MenuBarItem, MenuDisplay, MenuMetric, Settings, Tab};
@@ -134,68 +135,82 @@ pub fn title_and_value(m: MenuMetric, s: &Snapshot, u: &Units) -> (String, f64, 
 }
 
 /// The dropdown's figure lines (always exactly LINES).
-pub fn lines(m: MenuMetric, s: &Snapshot, u: &Units) -> Vec<String> {
+pub fn lines(m: MenuMetric, s: &Snapshot, u: &Units, i18n: &I18n) -> Vec<String> {
     let x = &s.machine;
     let cores = x.cpu.core_count;
+    let tf = |k: &str, a: &[(&str, &str)]| i18n.tf(k, a);
+    let w1 = |w: f64| i18n.num(format!("{w:.1} W"));
+    let w2 = |w: f64| i18n.num(format!("{w:.2} W"));
+    let dash = || "—".to_string();
     let mut v = match m {
         MenuMetric::Cpu => vec![
             format!("CPU {}", u.cpu(x.cpu.total_pct, cores)),
-            format!("User {:.0} % · System {:.0} %", x.cpu.user_pct, x.cpu.system_pct),
-            format!("Load {:.2} · {:.2} · {:.2}", x.cpu.load_avg[0], x.cpu.load_avg[1], x.cpu.load_avg[2]),
+            tf("tray.user_system", &[("user", &format!("{:.0}", x.cpu.user_pct)), ("system", &format!("{:.0}", x.cpu.system_pct))]),
+            tf(
+                "tray.load",
+                &[("a", &i18n.num(format!("{:.2}", x.cpu.load_avg[0]))), ("b", &i18n.num(format!("{:.2}", x.cpu.load_avg[1]))), ("c", &i18n.num(format!("{:.2}", x.cpu.load_avg[2])))],
+            ),
         ],
         MenuMetric::Memory => vec![
-            format!("Memory {} of {}", u.bytes(x.memory.used), u.bytes(x.memory.total)),
-            format!("App {} · Wired {} · Compressed {}", u.bytes(x.memory.app), u.bytes(x.memory.wired), u.bytes(x.memory.compressed)),
-            format!("Cached {} · Swap {}", u.bytes(x.memory.cached), u.bytes(x.memory.swap_used)),
+            tf("tray.memory_of", &[("used", &u.bytes(x.memory.used)), ("total", &u.bytes(x.memory.total))]),
+            tf("tray.memory_types", &[("app", &u.bytes(x.memory.app)), ("wired", &u.bytes(x.memory.wired)), ("compressed", &u.bytes(x.memory.compressed))]),
+            tf("tray.memory_cached", &[("cached", &u.bytes(x.memory.cached)), ("swap", &u.bytes(x.memory.swap_used))]),
         ],
         MenuMetric::Network => vec![
-            format!("Down {}", u.rate(x.network.rx_bps)),
-            format!("Up {}", u.rate(x.network.tx_bps)),
-            format!("{} interfaces active", x.network.interfaces.iter().filter(|i| i.rx_bps + i.tx_bps > 0.0).count()),
+            tf("tray.down", &[("v", &u.rate(x.network.rx_bps))]),
+            tf("tray.up", &[("v", &u.rate(x.network.tx_bps))]),
+            i18n.tn("tray.interfaces", x.network.interfaces.iter().filter(|i| i.rx_bps + i.tx_bps > 0.0).count(), &[]),
         ],
         MenuMetric::Disk => {
             let b = x.disk.boot_free();
             vec![
-                format!("Read {} · Write {}", u.rate(x.disk.read_bps), u.rate(x.disk.write_bps)),
-                b.map(|v| format!("{} free of {}", u.bytes(v.free), u.bytes(v.total))).unwrap_or_default(),
-                format!("{} volumes", x.disk.volumes.len()),
+                tf("tray.read_write", &[("r", &u.rate(x.disk.read_bps)), ("w", &u.rate(x.disk.write_bps))]),
+                b.map(|v| tf("tray.free_of", &[("free", &u.bytes(v.free)), ("total", &u.bytes(v.total))])).unwrap_or_default(),
+                i18n.tn("tray.volumes", x.disk.volumes.len(), &[]),
             ]
         }
         MenuMetric::Gpu => vec![
-            format!("GPU {:.0} %", x.gpu.utilization_pct),
-            format!("Memory in use {}", u.bytes(x.gpu.vram_used)),
-            x.gpu.power_w.map(|w| format!("Power {w:.1} W")).unwrap_or_else(|| x.gpu.name.clone()),
+            format!("GPU {}", i18n.num(format!("{:.0} %", x.gpu.utilization_pct))),
+            tf("tray.memory_in_use", &[("v", &u.bytes(x.gpu.vram_used))]),
+            x.gpu.power_w.map(|w| tf("tray.power", &[("v", &w1(w))])).unwrap_or_else(|| x.gpu.name.clone()),
         ],
         MenuMetric::Neural => vec![
-            format!("Neural Engine {:.2} W", x.neural.power_w),
-            format!("Estimated load {:.0} %", x.neural.utilization_pct),
-            if x.neural.available { "via IOReport".into() } else { "not available on this Mac".into() },
+            format!("Neural Engine {}", w2(x.neural.power_w)),
+            tf("tray.estimated_load", &[("v", &format!("{:.0}", x.neural.utilization_pct))]),
+            if x.neural.available { i18n.t("tray.via_ioreport") } else { i18n.t("tray.not_available") },
         ],
         MenuMetric::Temperature => vec![
-            format!("CPU {}", x.sensors.cpu_temp_c.map(|t| u.temp(t)).unwrap_or("—".into())),
-            format!("GPU {}", x.sensors.gpu_temp_c.map(|t| u.temp(t)).unwrap_or("—".into())),
-            format!("{} sensors", x.sensors.all.len()),
+            format!("CPU {}", x.sensors.cpu_temp_c.map(|t| u.temp(t)).unwrap_or_else(dash)),
+            format!("GPU {}", x.sensors.gpu_temp_c.map(|t| u.temp(t)).unwrap_or_else(dash)),
+            i18n.tn("tray.sensors", x.sensors.all.len(), &[]),
         ],
         MenuMetric::Fans => {
-            let mut l: Vec<String> = x.sensors.fans.iter().map(|f| format!("Fan {} · {:.0} rpm (max {:.0})", f.index + 1, f.rpm, f.max_rpm)).collect();
+            let mut l: Vec<String> = x
+                .sensors
+                .fans
+                .iter()
+                .map(|f| tf("tray.fan", &[("i", &(f.index + 1).to_string()), ("rpm", &format!("{:.0}", f.rpm)), ("max", &format!("{:.0}", f.max_rpm))]))
+                .collect();
             if l.is_empty() {
-                l.push("No fans (or not readable)".into());
+                l.push(i18n.t("tray.no_fans"));
             }
             l
         }
         MenuMetric::Battery => vec![
-            format!("Battery {:.0} %{}", x.battery.percent, if x.battery.charging { " · charging" } else { "" }),
-            x.battery.time_remaining_min.map(|t| format!("{} remaining", format_duration(t * 60))).unwrap_or_else(|| "Calculating…".into()),
-            format!(
-                "Health {} · {} cycles",
-                x.battery.health_pct.map(|h| format!("{h:.0} %")).unwrap_or("—".into()),
-                x.battery.cycle_count.map(|c| c.to_string()).unwrap_or("—".into())
+            tf("tray.battery", &[("v", &format!("{:.0}", x.battery.percent)), ("state", &if x.battery.charging { i18n.t("tray.charging") } else { String::new() })]),
+            x.battery.time_remaining_min.map(|t| tf("tray.remaining", &[("v", &format_duration(t * 60))])).unwrap_or_else(|| i18n.t("tray.calculating")),
+            tf(
+                "tray.health_cycles",
+                &[
+                    ("health", &x.battery.health_pct.map(|h| format!("{h:.0} %")).unwrap_or_else(dash)),
+                    ("cycles", &x.battery.cycle_count.map(|c| c.to_string()).unwrap_or_else(dash)),
+                ],
             ),
         ],
         MenuMetric::Power => vec![
-            format!("System {}", x.power.system_w.map(|w| format!("{w:.1} W")).unwrap_or("—".into())),
-            format!("CPU {} · GPU {}", x.power.cpu_w.map(|w| format!("{w:.1} W")).unwrap_or("—".into()), x.power.gpu_w.map(|w| format!("{w:.1} W")).unwrap_or("—".into())),
-            format!("Neural Engine {}", x.power.ane_w.map(|w| format!("{w:.2} W")).unwrap_or("—".into())),
+            tf("tray.system", &[("v", &x.power.system_w.map(w1).unwrap_or_else(dash))]),
+            format!("CPU {} · GPU {}", x.power.cpu_w.map(w1).unwrap_or_else(dash), x.power.gpu_w.map(w1).unwrap_or_else(dash)),
+            format!("Neural Engine {}", x.power.ane_w.map(w2).unwrap_or_else(dash)),
         ],
     };
     v.resize(LINES, String::new());
@@ -297,11 +312,13 @@ fn red_dot() -> (Vec<u8>, u32, u32) {
 
 // --- lifecycle -------------------------------------------------------------------------------
 
-fn signature(items: &[MenuBarItem]) -> String {
-    serde_json::to_string(items).unwrap_or_default()
+/// Menu bar layout plus language: either changing rebuilds the status items (their static
+/// labels are set at build time).
+fn signature(items: &[MenuBarItem], i18n: &I18n) -> String {
+    format!("{}|{}", i18n.lang(), serde_json::to_string(items).unwrap_or_default())
 }
 
-fn build_item(it: &MenuBarItem) -> Option<Item> {
+fn build_item(it: &MenuBarItem, i18n: &I18n) -> Option<Item> {
     let menu = Menu::new();
     let id = |s: String| s;
     let m = it.metric;
@@ -311,28 +328,28 @@ fn build_item(it: &MenuBarItem) -> Option<Item> {
         let _ = menu.append(l);
     }
     let _ = menu.append(&PredefinedMenuItem::separator());
-    let _ = menu.append(&MenuItem::with_id(format!("pb:{key}:hdr"), "Top apps", false, None));
+    let _ = menu.append(&MenuItem::with_id(format!("pb:{key}:hdr"), i18n.t("top_apps"), false, None));
     let apps: Vec<MenuItem> = (0..TOP).map(|i| MenuItem::with_id(format!("pb:{key}:app:{i}"), "—", false, None)).collect();
     for a in &apps {
         let _ = menu.append(a);
     }
     let _ = menu.append(&PredefinedMenuItem::separator());
-    let _ = menu.append(&MenuItem::with_id(format!("pb:open:{key}"), format!("Open {}…", m.label()), true, None));
-    let _ = menu.append(&MenuItem::with_id("pb:open:overview", "Open PulseBar", true, None));
-    let _ = menu.append(&MenuItem::with_id("pb:quit", "Quit PulseBar", true, None));
+    let _ = menu.append(&MenuItem::with_id(format!("pb:open:{key}"), i18n.tf("tray.open", &[("name", &i18n.t(m.key()))]), true, None));
+    let _ = menu.append(&MenuItem::with_id("pb:open:overview", i18n.t("tray.open_app"), true, None));
+    let _ = menu.append(&MenuItem::with_id("pb:quit", i18n.t("tray.quit_app"), true, None));
     let tray = TrayIconBuilder::new()
         .with_menu(Box::new(menu))
         .with_title("…")
-        .with_tooltip(format!("PulseBar · {}", m.label()))
+        .with_tooltip(format!("PulseBar · {}", i18n.t(m.key())))
         .build()
         .ok()?;
     Some(Item { metric: m, tray, lines, apps, last_title: RefCell::new(None), last_icon: RefCell::new(None), last_texts: RefCell::new(vec![]) })
 }
 
-fn build(settings: &Settings) -> Vec<Item> {
+fn build(settings: &Settings, i18n: &I18n) -> Vec<Item> {
     // macOS places newer status items to the left: create right-most first.
     let visible: Vec<&MenuBarItem> = settings.menubar.iter().filter(|i| i.visible).collect();
-    let mut items: Vec<Item> = visible.iter().rev().filter_map(|it| build_item(it)).collect();
+    let mut items: Vec<Item> = visible.iter().rev().filter_map(|it| build_item(it, i18n)).collect();
     items.reverse();
     items
 }
@@ -340,9 +357,10 @@ fn build(settings: &Settings) -> Vec<Item> {
 /// Main thread only.
 pub fn install(shared: Arc<Shared>) {
     let settings = shared.settings.read().unwrap().clone();
-    let items = build(&settings);
+    let i18n = I18n::new(settings.language.as_deref());
+    let items = build(&settings, &i18n);
     STATE.with(|s| {
-        *s.borrow_mut() = Some(State { shared, items, signature: signature(&settings.menubar), targets: HashMap::new() });
+        *s.borrow_mut() = Some(State { shared, items, signature: signature(&settings.menubar, &i18n), targets: HashMap::new() });
     });
     refresh();
 }
@@ -373,15 +391,18 @@ fn refresh_inner() {
         let mut guard = cell.borrow_mut();
         let Some(st) = guard.as_mut() else { return };
         let settings = st.shared.settings.read().unwrap().clone();
-        let sig = signature(&settings.menubar);
+        // The agent process reloads settings.json when it changes (see daemon::run), so a
+        // language switch made in the window reaches the menu bar within a sampling tick.
+        let i18n = I18n::new(settings.language.as_deref());
+        let sig = signature(&settings.menubar, &i18n);
         if sig != st.signature {
             st.items.clear(); // drops (removes) old status items
-            st.items = build(&settings);
+            st.items = build(&settings, &i18n);
             st.signature = sig;
         }
         let Some(snap) = st.shared.snapshot.read().unwrap().clone() else { return };
         let sparks = st.shared.sparks.read().unwrap().clone();
-        let u = settings.units;
+        let u = Units { decimal_comma: i18n.decimal_comma(), ..settings.units };
         st.targets.clear();
         for item in &st.items {
             let Some(cfg) = settings.menubar.iter().find(|c| c.metric == item.metric) else { continue };
@@ -416,7 +437,7 @@ fn refresh_inner() {
                 item.tray.set_title(new_title.clone());
                 *item.last_title.borrow_mut() = new_title;
             }
-            for (i, (mi, text)) in item.lines.iter().zip(lines(item.metric, &snap, &u)).enumerate() {
+            for (i, (mi, text)) in item.lines.iter().zip(lines(item.metric, &snap, &u, &i18n)).enumerate() {
                 item.set_text(i, mi, if text.is_empty() { " " } else { &text });
             }
             let rank = rank_for(item.metric);
@@ -425,7 +446,10 @@ fn refresh_inner() {
             for (i, mi) in item.apps.iter().enumerate() {
                 match top.get(i) {
                     Some(a) => {
-                        let text = format!("{} — {}  ({} proc.)", a.app.name, metric_value(a, rank, &u, snap.machine.cpu.core_count), a.process_count);
+                        let text = i18n.tf(
+                            "tray.app_line",
+                            &[("name", &a.app.name), ("value", &metric_value(a, rank, &u, snap.machine.cpu.core_count)), ("n", &a.process_count.to_string())],
+                        );
                         item.set_text(LINES + i, mi, &text);
                         mi.set_enabled(true);
                         st.targets.insert(format!("pb:{key}:app:{i}"), (tab_for(item.metric), a.key.clone()));

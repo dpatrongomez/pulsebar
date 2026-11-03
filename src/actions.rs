@@ -10,6 +10,7 @@ use std::collections::HashSet;
 use anyhow::{Result, bail};
 use serde::{Deserialize, Serialize};
 
+use crate::i18n::I18n;
 use crate::model::Snapshot;
 use crate::paths;
 use crate::sys;
@@ -73,23 +74,54 @@ impl Plan {
         if self.pids.len() > 1 { format!("{} processes", self.pids.len()) } else { "1 process".into() }
     }
 
-    /// Dialog title: "Quit Brave Browser?" / "Force quit node (pid 42)?".
+    /// Dialog title: "Quit Brave Browser?" / "Force quit node (pid 42)?" (English: CLI/MCP).
     pub fn headline(&self) -> String {
-        format!("{}?", self.verb_title())
+        self.headline_in(&I18n::english())
     }
 
-    /// The details a confirmation shows as separate chips: process count (when there are
-    /// processes), memory freed, and the ports that become free.
+    /// The details a confirmation shows as separate chips (English: CLI/MCP).
     pub fn details(&self) -> Vec<String> {
+        self.details_in(&I18n::english())
+    }
+
+    /// The target's display name in `i18n`'s language. Names of apps, processes and projects
+    /// are kept as they are; the two composed titles ("container x", "Claude session in y")
+    /// are rebuilt from their parts.
+    fn title_in(&self, i18n: &I18n) -> String {
+        match &self.target {
+            Target::Container(_) => match self.title.strip_prefix("container ") {
+                Some(name) => i18n.tf("plan.container", &[("name", name)]),
+                None => self.title.clone(),
+            },
+            Target::AgentSession(_) => match self.title.split_once(" session in ") {
+                Some((agent, project)) => i18n.tf("plan.agent_session", &[("agent", agent), ("project", project)]),
+                None => self.title.clone(),
+            },
+            _ => self.title.clone(),
+        }
+    }
+
+    /// `headline` in the UI language.
+    pub fn headline_in(&self, i18n: &I18n) -> String {
+        let key = match self.mode {
+            Mode::Quit => "plan.quit",
+            Mode::ForceQuit => "plan.force_quit",
+        };
+        i18n.tf(key, &[("title", &self.title_in(i18n))])
+    }
+
+    /// `details` in the UI language: process count (when there are processes), memory freed,
+    /// and the ports that become free.
+    pub fn details_in(&self, i18n: &I18n) -> Vec<String> {
         let mut v = vec![];
         if !self.pids.is_empty() {
-            v.push(self.process_label());
+            v.push(i18n.tn("n.processes", self.pids.len(), &[]));
         }
-        v.push(format!("Frees {}", format_bytes(self.mem_bytes as f64)));
+        v.push(i18n.tf("plan.frees", &[("mem", &i18n.num(format_bytes(self.mem_bytes as f64)))]));
         match self.ports.len() {
             0 => {}
-            1 => v.push(format!("Port {}", self.ports[0])),
-            _ => v.push(format!("Ports {}", join_ports(&self.ports))),
+            1 => v.push(i18n.tf("plan.port", &[("ports", &self.ports[0].to_string())])),
+            _ => v.push(i18n.tf("plan.ports", &[("ports", &join_ports(&self.ports))])),
         }
         v
     }
@@ -248,6 +280,23 @@ pub fn execute(c: Confirmed) -> Outcome {
     Outcome { ok, stopped, failed, mem_freed: plan.mem_bytes, ports_freed: plan.ports, message }
 }
 
+/// The toast after an action, in the UI language (the `Outcome::message` is English for CLI/MCP).
+pub fn outcome_message(i18n: &I18n, plan: &Plan, o: &Outcome) -> String {
+    let title = plan.title_in(i18n);
+    if o.ok {
+        let mem = i18n.num(format_bytes(plan.mem_bytes as f64));
+        return match plan.ports.len() {
+            0 => i18n.tf("freed.none", &[("title", &title), ("mem", &mem)]),
+            1 => i18n.tf("freed.port", &[("title", &title), ("mem", &mem), ("ports", &plan.ports[0].to_string())]),
+            _ => i18n.tf("freed.ports", &[("title", &title), ("mem", &mem), ("ports", &join_ports(&plan.ports))]),
+        };
+    }
+    if matches!(plan.target, Target::Container(_)) {
+        return i18n.tf("freed.container_failed", &[("title", &title)]);
+    }
+    i18n.tf("freed.partial", &[("title", &title), ("failed", &o.failed.len().to_string()), ("total", &plan.pids.len().to_string())])
+}
+
 pub fn freed_message(title: &str, mem: u64, ports: &[u16]) -> String {
     match ports.len() {
         0 => format!("{title} stopped. {} is free.", format_bytes(mem as f64)),
@@ -360,6 +409,26 @@ mod tests {
     fn freed_messages() {
         assert_eq!(freed_message("storefront-web", 458_000_000, &[4322]), "storefront-web stopped. 458 MB and port 4322 are free.");
         assert_eq!(freed_message("x", 1_370_000_000, &[3000, 8000]), "x stopped. 1.37 GB and ports 3000, 8000 are free.");
+    }
+
+    #[test]
+    fn localised_headline_details_and_outcome() {
+        let es = I18n::new(Some("es"));
+        let mut p = Plan { target: Target::App("x".into()), mode: Mode::Quit, title: "Brave".into(), pids: vec![1, 2, 3], mem_bytes: 3_070_000_000, ports: vec![3000] };
+        assert_eq!(p.headline_in(&es), "¿Salir de Brave?");
+        assert_eq!(p.details_in(&es), vec!["3 procesos", "Libera 3,07 GB", "Puerto 3000"]);
+        p.mode = Mode::ForceQuit;
+        p.pids = vec![1];
+        assert_eq!(p.headline_in(&es), "¿Forzar la salida de Brave?");
+        assert_eq!(p.details_in(&es)[0], "1 proceso");
+        p.target = Target::Container("abc".into());
+        p.title = "container db".into();
+        assert_eq!(p.headline_in(&es), "¿Forzar la salida de contenedor db?");
+        // English stays what the CLI and MCP print.
+        assert_eq!(p.headline(), "Force quit container db?");
+        let o = Outcome { ok: true, stopped: vec![], failed: vec![], mem_freed: 0, ports_freed: vec![], message: String::new() };
+        assert_eq!(outcome_message(&es, &p, &o), "contenedor db detenido. 3,07 GB y el puerto 3000 quedan libres.");
+        assert_eq!(outcome_message(&I18n::english(), &p, &o), "container db stopped. 3.07 GB and port 3000 are free.");
     }
 
     #[test]

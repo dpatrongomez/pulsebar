@@ -127,6 +127,24 @@ fn settings_has_launched_before() -> bool {
     seen
 }
 
+/// Dock / Cmd-Tab icon for the window process. Without one, eframe sets its own default egui
+/// logo at runtime, overriding the bundle icon. Inside PulseBar.app an empty `IconData` tells
+/// eframe to leave the icon alone, so macOS uses AppIcon.icns (every resolution). Outside a
+/// bundle (`cargo run`) there's no .icns, so use the embedded 256 px PNG.
+fn app_icon() -> eframe::egui::IconData {
+    let in_bundle = std::env::current_exe().is_ok_and(|p| p.to_string_lossy().contains(".app/Contents/MacOS/"));
+    if in_bundle {
+        return eframe::egui::IconData::default();
+    }
+    image::load_from_memory(include_bytes!("../../docs/icon.png"))
+        .map(|img| {
+            let img = img.to_rgba8();
+            let (width, height) = img.dimensions();
+            eframe::egui::IconData { rgba: img.into_raw(), width, height }
+        })
+        .unwrap_or_default()
+}
+
 /// The window process.
 pub fn run_window(tab: Tab, app: Option<String>) -> anyhow::Result<()> {
     let _ = paths::ensure_dirs();
@@ -138,7 +156,8 @@ pub fn run_window(tab: Tab, app: Option<String>) -> anyhow::Result<()> {
             .with_title("PulseBar")
             // Screenshots (PULSEBAR_SCREENSHOT) use a taller window so whole tabs fit.
             .with_inner_size(if std::env::var_os("PULSEBAR_SCREENSHOT").is_some() { [1180.0, 1400.0] } else { [1180.0, 760.0] })
-            .with_min_inner_size([820.0, 520.0]),
+            .with_min_inner_size([820.0, 520.0])
+            .with_icon(app_icon()),
         ..Default::default()
     };
     let r = eframe::run_native(

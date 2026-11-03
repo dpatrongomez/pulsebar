@@ -1,8 +1,10 @@
 //! User settings (JSON in Application Support). Layout survives restarts.
 
 use crate::paths;
+use crate::sorting::ListSort;
 use crate::units::Units;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -221,6 +223,8 @@ pub struct Settings {
     pub alert_network_bps: f64,
     pub notifications: bool,
     pub plans: Vec<PlanConfig>,
+    /// Per-tab list sorting and optional columns; tabs without an entry use their default.
+    pub list_sort: HashMap<Tab, ListSort>,
 }
 
 impl Default for Settings {
@@ -259,6 +263,7 @@ impl Default for Settings {
                     manual_resets_at: None,
                 },
             ],
+            list_sort: HashMap::new(),
         }
     }
 }
@@ -352,6 +357,7 @@ impl Settings {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sorting::{SortKey, SortSpec};
 
     #[test]
     fn layout_roundtrip_preserves_order() {
@@ -366,6 +372,29 @@ mod tests {
         let visible: Vec<_> = back.menubar.iter().filter(|i| i.visible).map(|i| i.metric).collect();
         assert_eq!(visible, vec![MenuMetric::Memory, MenuMetric::Cpu]);
         assert!(!back.mcp_enabled, "MCP must be off by default");
+    }
+
+    #[test]
+    fn list_sort_roundtrips_per_tab() {
+        let mut s = Settings::default();
+        s.list_sort.insert(Tab::Cpu, ListSort { apps: Some(SortSpec { key: SortKey::Name, desc: false }), procs: Some(SortSpec { key: SortKey::Pid, desc: true }), extra_columns: true });
+        s.list_sort.insert(Tab::Memory, ListSort { procs: Some(SortSpec { key: SortKey::Energy, desc: false }), ..Default::default() });
+        let json = serde_json::to_string_pretty(&s).unwrap();
+        assert!(json.contains("\"cpu\""), "tabs serialise as snake_case keys: {json}");
+        let back: Settings = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.list_sort, s.list_sort);
+        assert_eq!(back, s);
+    }
+
+    #[test]
+    fn old_settings_without_list_sort_still_load() {
+        let s: Settings = serde_json::from_str(r#"{"compact":true,"theme":"brand"}"#).unwrap();
+        assert!(s.compact);
+        assert!(s.list_sort.is_empty());
+        // A partially specified entry fills the rest from defaults.
+        let s: Settings = serde_json::from_str(r#"{"list_sort":{"memory":{"extra_columns":true}}}"#).unwrap();
+        let m = &s.list_sort[&Tab::Memory];
+        assert!(m.extra_columns && m.apps.is_none() && m.procs.is_none());
     }
 
     #[test]

@@ -68,6 +68,37 @@ fn sub_columns(inner: Rect) -> [f32; 4] {
     [pid, cpu, memory, energy]
 }
 
+/// Width reserved for each optional CPU / Memory column in the app list.
+const EXTRA_COL_W: f32 = 92.0;
+
+fn meter_width(row_inner_width: f32) -> f32 {
+    240.0_f32.min(row_inner_width * 0.3)
+}
+
+/// Right edge of optional column `i` of `n`, left of the meter; the last one sits next to it.
+fn extra_col_right(inner_right: f32, meter_w: f32, n: usize, i: usize) -> f32 {
+    inner_right - meter_w - 24.0 - (n - 1 - i) as f32 * EXTRA_COL_W
+}
+
+/// A clickable column header: `pos` is the left edge (left-aligned) or the right edge
+/// (right-aligned) of the text. The active column is emphasised and shows ⏶/⏷ for the direction.
+fn sort_header(ui: &mut egui::Ui, id: impl std::hash::Hash, pos: egui::Pos2, right: bool, label: &str, key: SortKey, spec: SortSpec) -> bool {
+    let arrow = spec.arrow(key);
+    let text = match (arrow.is_empty(), right) {
+        (true, _) => label.to_string(),
+        (false, true) => format!("{arrow} {label}"),
+        (false, false) => format!("{label} {arrow}"),
+    };
+    let active = spec.key == key;
+    let galley = ui.painter().layout_no_wrap(text, egui::FontId::proportional(11.5), Color32::PLACEHOLDER);
+    let anchor = if right { egui::Align2::RIGHT_CENTER } else { egui::Align2::LEFT_CENTER };
+    let rect = anchor.anchor_size(pos, galley.size());
+    let resp = ui.interact(rect.expand2(Vec2::new(4.0, 4.0)), ui.id().with(id), egui::Sense::click());
+    let color = if active || resp.hovered() { ui.visuals().strong_text_color() } else { ui.visuals().weak_text_color() };
+    ui.painter().galley(rect.min, galley, color);
+    resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked()
+}
+
 fn watts(v: Option<f64>) -> String {
     v.map(|w| if w < 1.0 { format!("{:.0} mW", w * 1000.0) } else { format!("{w:.1} W") }).unwrap_or("—".into())
 }
@@ -275,6 +306,16 @@ impl PulseApp {
         let mut action: Option<(Target, Mode)> = None;
         let mut inspect: Option<i32> = None;
         let mut export: Option<bool> = None;
+        let (m_key, ls) = (SortKey::from_metric(m), self.settings.list_sort.get(&self.tab).cloned().unwrap_or_default());
+        let app_sort = ls.apps.unwrap_or(SortSpec::for_metric(m));
+        let proc_sort = ls.procs.unwrap_or(SortSpec::for_metric(m));
+        // CPU and Memory side by side with the tab's own metric (which is always shown).
+        let extras: Vec<SortKey> = if ls.extra_columns { [SortKey::Cpu, SortKey::Memory].into_iter().filter(|k| *k != m_key).collect() } else { vec![] };
+        let mut app_click: Option<SortKey> = None;
+        let mut proc_click: Option<SortKey> = None;
+        let mut toggle_extras = false;
+        // The frozen order only applies to the sort it was captured under.
+        let frozen_ok = self.frozen.as_ref().is_some_and(|f| f.metric == m && f.apps_sort == app_sort && f.procs_sort == proc_sort);
         let mut shown_apps: Vec<String> = vec![];
         let mut shown_procs: HashMap<String, Vec<i32>> = HashMap::new();
         let danger = self.pal(ui.ctx()).danger;
@@ -287,22 +328,48 @@ impl PulseApp {
                 ui.label(RichText::new(format!("· {} processes in {} apps", snap.processes.len(), snap.apps.len())).size(12.0).weak());
                 ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
                     ui.add_space(10.0);
-                    ui.label(RichText::new(col).size(14.0).weak());
-                    ui.add_space(12.0);
                     if ui.add(egui::Button::new(RichText::new("Share (dark)").size(12.0)).frame(false)).on_hover_text("Export a dark share card (1200×630)").clicked() {
                         export = Some(true);
                     }
                     if ui.add(egui::Button::new(RichText::new("Share (light)").size(12.0)).frame(false)).on_hover_text("Export a light share card (1200×630)").clicked() {
                         export = Some(false);
                     }
+                    let mark = if ls.extra_columns { "☑" } else { "☐" };
+                    if ui.add(egui::Button::new(RichText::new(format!("{mark} {}", self.i18n.t("col.cpu_mem"))).size(12.0)).frame(false)).clicked() {
+                        toggle_extras = true;
+                    }
                 });
             });
-            ui.add_space(6.0);
+            // Column headers of the app list; positions match the painted row cells below.
+            let (hdr, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 22.0), egui::Sense::hover());
+            let hin = hdr.shrink2(Vec2::new(14.0, 0.0));
+            let hmeter_w = meter_width(hin.width());
+            let cy = hin.center().y;
+            if sort_header(ui, "app-hdr-name", egui::pos2(hin.left() + 40.0, cy), false, &self.i18n.t("col.name"), SortKey::Name, app_sort) {
+                app_click = Some(SortKey::Name);
+            }
+            for (i, k) in extras.iter().enumerate() {
+                let x = extra_col_right(hin.right(), hmeter_w, extras.len(), i);
+                let label = if *k == SortKey::Cpu { self.i18n.t("tab.cpu") } else { self.i18n.t("tab.memory") };
+                if sort_header(ui, ("app-hdr", *k), egui::pos2(x, cy), true, &label, *k, app_sort) {
+                    app_click = Some(*k);
+                }
+            }
+            if sort_header(ui, "app-hdr-metric", egui::pos2(hin.right(), cy), true, col, m_key, app_sort) {
+                app_click = Some(m_key);
+            }
+            ui.painter().hline(hin.x_range(), hdr.bottom(), egui::Stroke::new(1.0, ui.visuals().widgets.noninteractive.bg_stroke.color.gamma_multiply(0.6)));
+            ui.add_space(4.0);
             // While the pointer is over the list, keep last frame's order: values keep updating,
             // rows don't move. New apps appear once the pointer leaves.
-            let top: Vec<&AppGroup> = match self.frozen.as_ref().filter(|f| f.metric == m) {
+            // The list is the top `n` apps by the tab's metric, ordered by the chosen column.
+            let top: Vec<&AppGroup> = match self.frozen.as_ref().filter(|_| frozen_ok) {
                 Some(f) => f.apps.iter().filter_map(|k| snap.apps.iter().find(|a| &a.key == k)).collect(),
-                None => snap.top_apps(m, n),
+                None => {
+                    let mut v = snap.top_apps(m, n);
+                    sorting::sort_apps(&mut v, app_sort);
+                    v
+                }
             };
             let max = top.iter().map(|a| a.metric(m)).fold(0.0, f64::max).max(1e-9);
             let hover_fill = if ui.visuals().dark_mode { Color32::from_rgb(38, 38, 42) } else { Color32::from_rgb(244, 244, 247) };
@@ -318,18 +385,23 @@ impl PulseApp {
                     ui.painter().rect_filled(rect, 12.0, hover_fill);
                 }
                 let inner = rect.shrink2(Vec2::new(14.0, 8.0));
-                let meter_w = 240.0_f32.min(inner.width() * 0.3);
+                let meter_w = meter_width(inner.width());
                 // Value and meter are painted at fixed positions on the right so every row lines up.
                 let value = output::metric_value(a, m, &u, cores);
                 let strong = ui.visuals().strong_text_color();
                 ui.painter().text(egui::pos2(inner.right(), inner.top() + 10.0), egui::Align2::RIGHT_CENTER, &value, egui::FontId::proportional(15.0), strong);
+                for (i, k) in extras.iter().enumerate() {
+                    let text = if *k == SortKey::Cpu { u.cpu(a.cpu_pct, cores) } else { u.bytes(a.mem_bytes) };
+                    let x = extra_col_right(inner.right(), meter_w, extras.len(), i);
+                    ui.painter().text(egui::pos2(x, inner.top() + 10.0), egui::Align2::RIGHT_CENTER, text, egui::FontId::proportional(14.0), ui.visuals().text_color());
+                }
                 let mrect = Rect::from_min_size(egui::pos2(inner.right() - meter_w, inner.bottom() - 9.0), Vec2::new(meter_w, 5.0));
                 ui.painter().rect_filled(mrect, 2.5, ui.visuals().extreme_bg_color);
                 let frac = (a.metric(m) / max).clamp(0.0, 1.0) as f32;
                 if frac > 0.0 {
                     ui.painter().rect_filled(Rect::from_min_size(mrect.min, Vec2::new((meter_w * frac).max(3.0), 5.0)), 2.5, color);
                 }
-                let left = Rect::from_min_max(inner.min, egui::pos2(inner.right() - meter_w - 16.0, inner.bottom()));
+                let left = Rect::from_min_max(inner.min, egui::pos2(inner.right() - meter_w - 16.0 - extras.len() as f32 * EXTRA_COL_W, inner.bottom()));
                 ui.new_child(egui::UiBuilder::new().max_rect(left).layout(egui::Layout::left_to_right(Align::Center))).scope(|ui| {
                     ui.style_mut().interaction.selectable_labels = false;
                     self.app_icon(ui, a.app.bundle_path.as_deref(), &a.app.name, 32.0);
@@ -362,17 +434,11 @@ impl PulseApp {
                 }
                 if open {
                     let mut procs: Vec<&Process> = a.pids.iter().filter_map(|p| snap.process(*p)).collect();
-                    let frozen_pids = self.frozen.as_ref().filter(|f| f.metric == m).and_then(|f| f.procs.get(&a.key));
-                    if let Some(order) = frozen_pids {
-                        let pos = |pid: i32| order.iter().position(|x| *x == pid).unwrap_or(usize::MAX);
-                        procs.sort_by_key(|p| pos(p.pid));
-                    } else { procs.sort_by(|x, y| match m {
-                        RankMetric::Cpu => y.cpu_pct.total_cmp(&x.cpu_pct),
-                        RankMetric::Energy => y.energy_w.total_cmp(&x.energy_w),
-                        RankMetric::Disk => (y.disk_read_bps + y.disk_write_bps).total_cmp(&(x.disk_read_bps + x.disk_write_bps)),
-                        RankMetric::Network => (y.net_rx_bps + y.net_tx_bps).total_cmp(&(x.net_rx_bps + x.net_tx_bps)),
-                        _ => y.mem_bytes.cmp(&x.mem_bytes),
-                    }); }
+                    let frozen_pids = self.frozen.as_ref().filter(|_| frozen_ok).and_then(|f| f.procs.get(&a.key));
+                    match frozen_pids {
+                        Some(order) => sorting::follow_frozen(&mut procs, order),
+                        None => sorting::sort_procs(&mut procs, proc_sort),
+                    }
                     shown_procs.insert(a.key.clone(), procs.iter().take(200).map(|p| p.pid).collect());
                     // Painter-drawn sub-list: rows span the same width as the app rows, numeric
                     // columns are right-aligned at fixed offsets from the right edge, and the
@@ -382,10 +448,15 @@ impl PulseApp {
                     let (hdr, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 24.0), egui::Sense::hover());
                     let hin = hdr.shrink2(Vec2::new(14.0, 0.0));
                     let cols = sub_columns(hin);
-                    let hfont = egui::FontId::proportional(11.5);
-                    ui.painter().text(egui::pos2(hin.left() + SUB_INDENT, hin.center().y + 2.0), egui::Align2::LEFT_CENTER, "Process", hfont.clone(), weak);
-                    for (x, label) in cols.iter().zip(["PID", "CPU", "Memory", "Energy"]) {
-                        ui.painter().text(egui::pos2(*x, hin.center().y + 2.0), egui::Align2::RIGHT_CENTER, label, hfont.clone(), weak);
+                    let hy = hin.center().y + 2.0;
+                    if sort_header(ui, ("proc-hdr-name", &a.key), egui::pos2(hin.left() + SUB_INDENT, hy), false, &self.i18n.t("col.process"), SortKey::Name, proc_sort) {
+                        proc_click = Some(SortKey::Name);
+                    }
+                    let proc_cols = [(SortKey::Pid, self.i18n.t("col.pid")), (SortKey::Cpu, self.i18n.t("tab.cpu")), (SortKey::Memory, self.i18n.t("tab.memory")), (SortKey::Energy, self.i18n.t("col.energy"))];
+                    for (x, (key, label)) in cols.iter().zip(proc_cols) {
+                        if sort_header(ui, ("proc-hdr", &a.key, key), egui::pos2(*x, hy), true, &label, key, proc_sort) {
+                            proc_click = Some(key);
+                        }
                     }
                     ui.painter().hline(hin.x_range(), hdr.bottom(), egui::Stroke::new(1.0, ui.visuals().widgets.noninteractive.bg_stroke.color.gamma_multiply(0.6)));
                     let (quit_tip, inspect_tip) = (self.i18n.t("quit") + "…", self.i18n.t("inspect"));
@@ -429,7 +500,24 @@ impl PulseApp {
         });
         // A confirmation dialog on top of the list doesn't count as hovering it.
         let over_list = ui.rect_contains_pointer(card.response.rect) && self.confirm.is_none() && action.is_none();
-        self.frozen = over_list.then_some(FrozenOrder { metric: m, apps: shown_apps, procs: shown_procs });
+        self.frozen = over_list.then_some(FrozenOrder { metric: m, apps: shown_apps, procs: shown_procs, apps_sort: app_sort, procs_sort: proc_sort });
+        // Header clicks are explicit: persist the choice and drop the frozen order so the next
+        // frame re-sorts immediately, even with the pointer over the list.
+        if app_click.is_some() || proc_click.is_some() || toggle_extras {
+            let entry = self.settings.list_sort.entry(self.tab).or_default();
+            if let Some(k) = app_click {
+                entry.apps = Some(app_sort.clicked(k));
+            }
+            if let Some(k) = proc_click {
+                entry.procs = Some(proc_sort.clicked(k));
+            }
+            if toggle_extras {
+                entry.extra_columns = !entry.extra_columns;
+            }
+            self.frozen = None;
+            self.save_settings(ui.ctx());
+            ui.ctx().request_repaint();
+        }
         ui.add_space(14.0);
         if let Some(dark) = export {
             let card = crate::cli::card_for(snap, m, &self.settings, dark);

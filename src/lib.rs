@@ -28,6 +28,7 @@ pub mod projects;
 pub mod sampler;
 pub mod settings;
 pub mod share_card;
+pub mod sorting;
 pub mod sys;
 pub mod units;
 pub mod views;

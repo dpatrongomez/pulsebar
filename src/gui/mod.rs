@@ -34,6 +34,19 @@ pub fn show_app() {
     }
 }
 
+/// Make the window process a regular app: Dock icon, Cmd-Tab entry, and a window that stays put
+/// (behind other windows) when another app is activated. The bundle is `LSUIElement` (so the
+/// menu bar agent has no Dock icon) and winit leaves the policy alone in bundled apps, so without
+/// this the window process would be an Accessory app too: no way back to its window once covered.
+/// Main thread only. The process exits when the window closes, which removes the Dock icon again.
+fn become_regular_app() {
+    #[cfg(target_os = "macos")]
+    if let Some(mtm) = objc2::MainThreadMarker::new() {
+        use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy};
+        NSApplication::sharedApplication(mtm).setActivationPolicy(NSApplicationActivationPolicy::Regular);
+    }
+}
+
 fn window_running() -> bool {
     std::fs::read_to_string(paths::window_pid_file())
         .ok()
@@ -132,6 +145,10 @@ pub fn run_window(tab: Tab, app: Option<String>) -> anyhow::Result<()> {
         "PulseBar",
         options,
         Box::new(move |cc| {
+            // Screenshot runs stay Dock-less (existing behaviour).
+            if std::env::var_os("PULSEBAR_SCREENSHOT").is_none() {
+                become_regular_app();
+            }
             show_app();
             Ok(Box::new(app::PulseApp::new(cc, shared, tab, app)))
         }),

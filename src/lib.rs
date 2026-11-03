@@ -19,6 +19,7 @@ pub mod i18n;
 pub mod inspector;
 pub mod limits;
 pub mod live;
+pub mod login_item;
 pub mod mcp;
 pub mod model;
 pub mod net_policy;

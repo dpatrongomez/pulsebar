@@ -35,6 +35,15 @@ const TABLE: &[Row] = &[
     ("stop",           ["Stop…","Detener…","Stoppen…","Arrêter…","Ferma…","Stoppen…","Parar…","Stoppa…","Зупинити…","停止…","중지…","停止…"]),
     ("stop_all",       ["Stop All…","Detener todo…","Alle stoppen…","Tout arrêter…","Ferma tutto…","Alles stoppen…","Parar tudo…","Stoppa alla…","Зупинити все…","すべて停止…","모두 중지…","全部停止…"]),
     ("reset_layout",   ["Reset layout","Restablecer diseño","Layout zurücksetzen","Réinitialiser la disposition","Ripristina layout","Indeling herstellen","Redefinir layout","Återställ layout","Скинути розкладку","レイアウトをリセット","레이아웃 재설정","重置布局"]),
+    ("login.section",          ["Startup","Inicio","Start","Démarrage","Avvio","Opstarten","Inicialização","Start","Запуск","起動","시작","启动"]),
+    ("login.toggle",           ["Open at login","Abrir al iniciar sesión","Beim Anmelden öffnen","Ouvrir à la connexion","Apri al login","Openen bij inloggen","Abrir ao iniciar sessão","Öppna vid inloggning","Відкривати під час входу","ログイン時に開く","로그인 시 열기","登录时打开"]),
+    ("login.requires_approval",["Requires approval","Requiere aprobación","Erfordert Genehmigung","Approbation requise","Richiede approvazione","Goedkeuring vereist","Requer aprovação","Kräver godkännande","Потрібне схвалення","承認が必要","승인 필요","需要批准"]),
+    ("login.open_settings",    ["Open Login Items…","Abrir Ítems de inicio…","Anmeldeobjekte öffnen…","Ouvrir les éléments de connexion…","Apri Elementi login…","Open inlogonderdelen…","Abrir Itens de início…","Öppna Inloggningsobjekt…","Відкрити елементи входу…","ログイン項目を開く…","로그인 항목 열기…","打开登录项…"]),
+    ("login.unbundled",        ["Only available in the installed PulseBar app.","Solo disponible en la app PulseBar instalada.","Nur in der installierten PulseBar-App verfügbar.","Disponible uniquement dans l’app PulseBar installée.","Disponibile solo nell’app PulseBar installata.","Alleen beschikbaar in de geïnstalleerde PulseBar-app.","Disponível apenas no app PulseBar instalado.","Endast tillgängligt i den installerade PulseBar-appen.","Доступно лише в установленій програмі PulseBar.","インストール済みの PulseBar アプリでのみ利用できます。","설치된 PulseBar 앱에서만 사용할 수 있습니다.","仅在已安装的 PulseBar 应用中可用。"]),
+    ("login.unsupported",      ["Requires macOS 13 or later.","Requiere macOS 13 o posterior.","Erfordert macOS 13 oder neuer.","Nécessite macOS 13 ou version ultérieure.","Richiede macOS 13 o versioni successive.","Vereist macOS 13 of nieuwer.","Requer macOS 13 ou posterior.","Kräver macOS 13 eller senare.","Потрібна macOS 13 або новіша.","macOS 13 以降が必要です。","macOS 13 이상이 필요합니다.","需要 macOS 13 或更高版本。"]),
+    ("login.error",            ["Couldn’t change the login item","No se pudo cambiar el ítem de inicio","Anmeldeobjekt konnte nicht geändert werden","Impossible de modifier l’élément de connexion","Impossibile modificare l’elemento login","Kan het inlogonderdeel niet wijzigen","Não foi possível alterar o item de início","Det gick inte att ändra inloggningsobjektet","Не вдалося змінити елемент входу","ログイン項目を変更できませんでした","로그인 항목을 변경할 수 없습니다","无法更改登录项"]),
+    ("login.offer",            ["Open PulseBar automatically when you log in?","¿Abrir PulseBar automáticamente al iniciar sesión?","PulseBar beim Anmelden automatisch öffnen?","Ouvrir PulseBar automatiquement à la connexion ?","Aprire PulseBar automaticamente al login?","PulseBar automatisch openen bij inloggen?","Abrir o PulseBar automaticamente ao iniciar sessão?","Öppna PulseBar automatiskt vid inloggning?","Автоматично відкривати PulseBar під час входу?","ログイン時に PulseBar を自動的に開きますか？","로그인 시 PulseBar를 자동으로 열까요?","登录时自动打开 PulseBar？"]),
+    ("login.not_now",          ["Not now","Ahora no","Nicht jetzt","Pas maintenant","Non ora","Niet nu","Agora não","Inte nu","Не зараз","今はしない","나중에","暂不"]),
 ];
 
 fn index_of(lang: &str) -> usize {
@@ -90,5 +99,7 @@ mod tests {
         assert_eq!(I18n::new(Some("zh-Hans-CN")).t("tab.memory"), "内存");
         assert_eq!(I18n::new(Some("xx")).t("peak"), "Peak");
         assert_eq!(I18n::new(Some("en")).t("missing.key"), "missing.key");
+        assert_eq!(I18n::new(Some("es")).t("login.toggle"), "Abrir al iniciar sesión");
+        assert_eq!(I18n::new(Some("en")).t("login.requires_approval"), "Requires approval");
     }
 }

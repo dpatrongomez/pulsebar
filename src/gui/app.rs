@@ -24,6 +24,7 @@ use crate::settings::{MenuDisplay, NumberFont, PlanConfig, Retention, Settings, 
 use crate::units::{CpuUnit, DataUnit, TempUnit, format_duration};
 use crate::{docker, limits, output, paths, projects, share_card, sys};
 
+mod login;
 mod tabs;
 
 struct Stat {
@@ -137,6 +138,7 @@ pub struct PulseApp {
     started: Option<Instant>,
     screenshot_requested: bool,
     series_cache: HashMap<String, (Instant, Vec<f64>)>,
+    login: login::LoginUi,
 }
 
 /// Row order of the app list while the pointer is over it. Without this a refresh can re-rank
@@ -176,6 +178,7 @@ impl PulseApp {
             started: None,
             screenshot_requested: false,
             series_cache: HashMap::new(),
+            login: login::LoginUi::new(),
             shared,
             settings,
         };
@@ -797,6 +800,7 @@ impl PulseApp {
     }
 
     fn settings_tab(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        self.login_section(ui);
         let mut changed = false;
         let s = &mut self.settings;
         Self::section(ui, "Units", "", |ui| {
@@ -1256,6 +1260,7 @@ impl eframe::App for PulseApp {
         }
         self.inspector_panel(ctx, &snap);
         egui::CentralPanel::default().show(ctx, |ui| {
+            self.login_banner(ui);
             self.alerts_bar(ui, &snap);
             egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| match self.tab {
                 Tab::Overview => self.overview(ui, &snap),

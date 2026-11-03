@@ -286,6 +286,8 @@ pub enum ActionIcon {
     Quit,
     /// Power symbol — force quit (SIGKILL).
     ForceQuit,
+    /// Ring with an "i" — open the process inspector.
+    Inspect,
 }
 
 /// Round, frameless icon button for row actions. The glyph is weak until hovered, then
@@ -321,6 +323,11 @@ pub fn icon_button(ui: &mut egui::Ui, icon: ActionIcon, color: Color32, tip: &st
             }).collect();
             p.add(egui::Shape::line(pts, stroke));
             p.line_segment([c + Vec2::new(0.0, -rad - 1.0), c + Vec2::new(0.0, -1.0)], stroke);
+        }
+        ActionIcon::Inspect => {
+            p.circle_stroke(c, 7.0, Stroke::new(1.5, fg));
+            p.line_segment([c + Vec2::new(0.0, -0.6), c + Vec2::new(0.0, 3.2)], stroke);
+            p.circle_filled(c + Vec2::new(0.0, -3.2), 1.1, fg);
         }
     }
     resp

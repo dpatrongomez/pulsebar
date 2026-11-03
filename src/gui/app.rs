@@ -24,6 +24,7 @@ use crate::settings::{MenuDisplay, NumberFont, PlanConfig, Retention, Settings, 
 use crate::units::{CpuUnit, DataUnit, TempUnit, format_duration};
 use crate::{docker, limits, output, paths, projects, share_card, sys};
 
+mod detail;
 mod tabs;
 
 struct Stat {
@@ -123,6 +124,7 @@ pub struct PulseApp {
     highlight: Option<String>,
     scroll_to_highlight: bool,
     inspector: Option<InspectorState>,
+    detail: Option<detail::AppDetailState>,
     confirm: Option<Plan>,
     pending: Vec<PendingRequest>,
     last_pending_poll: Instant,
@@ -162,6 +164,7 @@ impl PulseApp {
             scroll_to_highlight: app_key.is_some(),
             highlight: app_key,
             inspector: None,
+            detail: None,
             confirm: None,
             pending: vec![],
             last_pending_poll: Instant::now() - Duration::from_secs(10),
@@ -1255,6 +1258,7 @@ impl eframe::App for PulseApp {
             });
         }
         self.inspector_panel(ctx, &snap);
+        self.detail_panel(ctx, &snap);
         egui::CentralPanel::default().show(ctx, |ui| {
             self.alerts_bar(ui, &snap);
             egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| match self.tab {

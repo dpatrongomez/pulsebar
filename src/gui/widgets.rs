@@ -292,6 +292,8 @@ pub enum ActionIcon {
     MoveDown,
     /// Ring with an "i" — open the process inspector.
     Inspect,
+    /// Three bars — open the app's detail view with its history.
+    Details,
 }
 
 /// Round, frameless icon button for row actions. The glyph is weak until hovered, then
@@ -346,6 +348,11 @@ pub fn icon_button(ui: &mut egui::Ui, icon: ActionIcon, color: Color32, tip: &st
             p.circle_stroke(c, 7.0, Stroke::new(1.5, fg));
             p.line_segment([c + Vec2::new(0.0, -0.6), c + Vec2::new(0.0, 3.2)], stroke);
             p.circle_filled(c + Vec2::new(0.0, -3.2), 1.1, fg);
+        }
+        ActionIcon::Details => {
+            for (dx, h) in [(-4.5, 5.0), (0.0, 9.0), (4.5, 7.0)] {
+                p.line_segment([c + Vec2::new(dx, 5.0), c + Vec2::new(dx, 5.0 - h)], Stroke::new(2.4, fg));
+            }
         }
     }
     resp

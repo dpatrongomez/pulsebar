@@ -37,6 +37,27 @@ const TABLE: &[Row] = &[
     ("reset_layout",   ["Reset layout","Restablecer diseño","Layout zurücksetzen","Réinitialiser la disposition","Ripristina layout","Indeling herstellen","Redefinir layout","Återställ layout","Скинути розкладку","レイアウトをリセット","레이아웃 재설정","重置布局"]),
 ];
 
+/// Strings that only have English and Spanish so far (other languages fall back to English).
+#[rustfmt::skip]
+const TABLE_EN_ES: &[(&str, &str, &str)] = &[
+    ("details",          "Details", "Detalles"),
+    ("close",            "Close", "Cerrar"),
+    ("app_details",      "App details", "Detalles de la app"),
+    ("energy",           "Energy", "Energía"),
+    ("ports",            "Ports", "Puertos"),
+    ("signature",        "Code signature", "Firma de código"),
+    ("checking_sig",     "Checking code signature…", "Comprobando la firma de código…"),
+    ("unsigned",         "Not signed", "Sin firmar"),
+    ("recent_events",    "Notable events", "Eventos destacados"),
+    ("no_events",        "No alerts or restarts recorded in this period.", "Sin alertas ni reinicios en este periodo."),
+    ("peaks",            "Peaks", "Picos"),
+    ("event_alert",      "Alert", "Alerta"),
+    ("event_restart",    "Restart", "Reinicio"),
+    ("not_running",      "This app is not running. Showing recorded history only.", "Esta app no está en ejecución. Solo se muestra el historial guardado."),
+    ("no_app_history",   "Not enough history yet. History is kept for the busiest apps (top 15 by CPU, memory, energy, disk or network).", "Aún no hay suficiente historial. Se guarda para las apps más activas (las 15 primeras por CPU, memoria, energía, disco o red)."),
+    ("version",          "Version", "Versión"),
+];
+
 fn index_of(lang: &str) -> usize {
     let l = lang.replace('_', "-");
     if let Some(i) = LANGS.iter().position(|x| x.eq_ignore_ascii_case(&l)) {
@@ -76,7 +97,13 @@ impl I18n {
         LANGS[self.idx]
     }
     pub fn t(&self, key: &str) -> String {
-        TABLE.iter().find(|(k, _)| *k == key).map(|(_, v)| v[self.idx].to_string()).unwrap_or_else(|| key.to_string())
+        if let Some((_, v)) = TABLE.iter().find(|(k, _)| *k == key) {
+            return v[self.idx].to_string();
+        }
+        match TABLE_EN_ES.iter().find(|(k, _, _)| *k == key) {
+            Some((_, en, es)) => (if self.idx == 1 { *es } else { *en }).to_string(),
+            None => key.to_string(),
+        }
     }
 }
 
@@ -90,5 +117,7 @@ mod tests {
         assert_eq!(I18n::new(Some("zh-Hans-CN")).t("tab.memory"), "内存");
         assert_eq!(I18n::new(Some("xx")).t("peak"), "Peak");
         assert_eq!(I18n::new(Some("en")).t("missing.key"), "missing.key");
+        assert_eq!(I18n::new(Some("es")).t("details"), "Detalles");
+        assert_eq!(I18n::new(Some("de")).t("details"), "Details");
     }
 }

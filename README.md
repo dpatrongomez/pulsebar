@@ -35,9 +35,11 @@ src/
                     runtime, argv, cwd, CPU times, peak memory, open files, listening ports
   gui/tray.rs   M4  independent menu bar items: number / graph / both, framed, red threshold,
                     dropdown with family figures + top 5 apps → opens window at that app
-  gui/app.rs    M5  13 tabs + History + Settings, Top Apps with expandable helpers, share cards
+  gui/app.rs    M5  13 tabs + History + Settings, Top Apps with expandable helpers, share cards,
+                    per-app detail panel (click an app's name or the chart icon on hover)
   projects.rs, agents.rs, limits.rs, docker.rs   developer tabs
-  history.rs    M6  single SQLite file, 1 s/1 min/5 min/30 min/2 h/6 h buckets, retention
+  history.rs    M6  single SQLite file, 1 s/1 min/5 min/30 min/2 h/6 h buckets, retention,
+                    per-app series (cpu/memory/energy/disk/network) + alert/restart events
   alerts.rs     M7  sustained CPU, sustained memory growth, disk/network sustained
   mcp.rs        M8  stdio JSON-RPC MCP server (off by default)
   cli.rs, output.rs, views.rs   M9  CLI tables + JSON (schemas in schemas/)
@@ -121,3 +123,27 @@ command (`tests/fixtures/snapshot.json`); MCP protocol and data-scoping tests.
   logs include the real %; Copilot/Cursor are manual entry.
 - **Localisation** covers tab names and common labels in 12 languages via an in-code table.
 - Only tested on Apple silicon; Intel builds compile into the universal binary, but IOReport power isn't available on Intel.
+
+## History storage and per-app series
+
+History is one SQLite file (`history.sqlite`). Every series is kept at five resolutions (1 min → 24 h,
+5 min → 7 d, 30 min → 30 d, 2 h → 6 months, 6 h → 1 year), each capped by the retention chosen in Settings
+(default 90 days). The per-app detail panel reads the `app_cpu`, `app_memory`, `app_energy`, `app_disk` and
+`app_network` series of an app, plus an `events` table (alerts fired for the app, restarts = new main PID).
+
+Which apps are stored: the top 15 by each of CPU, memory, energy, disk and network at every tick (apps with a
+value of 0 don't qualify). An app outside that set shows only its live values in the detail panel.
+
+Size impact (measured on a real database: 585 728 B for 9 390 rows ≈ **62 B/row** including page overhead; ~65 B is
+used below). One app series produces 1 440 + 288 + 48 + 12 + 4 = 1 792 rows/day while the file fills, and levels
+settle at 6 336 rows per series with 90-day retention (8 552 with 1 year):
+
+| | series | rows at 90 d | size at 90 d | size at 1 year |
+|---|---|---|---|---|
+| Before (top 15 × CPU, memory, energy) | ≈ 75 | ≈ 475 k | ≈ 31 MB | ≈ 42 MB |
+| After (≈ 25 busiest apps × 5 metrics) | ≈ 125 | ≈ 790 k | ≈ 51 MB | ≈ 69 MB |
+
+So the detail view adds roughly 20 MB at the default retention. Growth is bounded by the same per-level retention as before; purging runs hourly.
+Events add < 100 B each (a handful per day) and are purged with the same retention. Older databases open unchanged:
+the schema change is additive (`events` table, `PRAGMA user_version = 2`), and disk/network history for apps
+starts accumulating after the upgrade.

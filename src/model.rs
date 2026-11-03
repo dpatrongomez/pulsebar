@@ -377,6 +377,7 @@ pub enum RankMetric {
 }
 
 impl RankMetric {
+    pub const ALL: [RankMetric; 5] = [Self::Cpu, Self::Memory, Self::Energy, Self::Disk, Self::Network];
     pub fn parse(s: &str) -> Option<Self> {
         match s.to_ascii_lowercase().as_str() {
             "cpu" => Some(Self::Cpu),

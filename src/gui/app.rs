@@ -10,6 +10,7 @@ use std::time::{Duration, Instant};
 
 use eframe::egui::{self, Align, Color32, Rect, RichText, Vec2};
 
+use super::dialog::{self, Dialog, DialogIcon};
 use super::icons::Icons;
 use super::widgets::{self, ActionIcon, Palette};
 use super::{Nav, show_app};
@@ -1067,24 +1068,36 @@ impl PulseApp {
         }
     }
 
-    fn dialogs(&mut self, ctx: &egui::Context) {
+    /// The app icon for a plan that targets one app (or one of its processes).
+    fn plan_icon(&mut self, ctx: &egui::Context, snap: &Snapshot, plan: &Plan, warn: Color32) -> DialogIcon {
+        let single_app = matches!(plan.target, Target::App(_) | Target::Pid(_));
+        let bundle = plan.pids.first().filter(|_| single_app).and_then(|pid| {
+            snap.apps.iter().find(|a| a.key != crate::grouping::SYSTEM_KEY && a.pids.contains(pid)).and_then(|a| a.app.bundle_path.clone())
+        });
+        match self.icons.get(ctx, bundle.as_deref()) {
+            Some(tex) => DialogIcon::App { tex, badge: (plan.mode == Mode::ForceQuit).then_some(warn) },
+            None => DialogIcon::Warning(warn),
+        }
+    }
+
+    fn dialogs(&mut self, ctx: &egui::Context, snap: &Snapshot) {
+        let pal = self.pal(ctx);
         if let Some(plan) = self.confirm.clone() {
-            let mut decided: Option<bool> = None;
-            egui::Modal::new(egui::Id::new("confirm")).show(ctx, |ui| {
-                ui.set_max_width(460.0);
-                ui.heading(if plan.mode == Mode::ForceQuit { "Force quit?" } else { "Confirm" });
-                ui.label(plan.summary());
-                ui.horizontal(|ui| {
-                    if ui.button(self.i18n.t("cancel")).clicked() {
-                        decided = Some(false);
-                    }
-                    let label = if plan.mode == Mode::ForceQuit { self.i18n.t("force_quit") } else { self.i18n.t("quit") };
-                    if ui.button(RichText::new(label).strong()).clicked() {
-                        decided = Some(true);
-                    }
-                });
-            });
-            match decided {
+            let force = plan.mode == Mode::ForceQuit;
+            let tone = if force { pal.danger } else { pal.warn };
+            let d = Dialog {
+                id: "confirm",
+                icon: self.plan_icon(ctx, snap, &plan, tone),
+                title: plan.headline(),
+                subject: None,
+                lines: if force { vec!["The process is stopped immediately; unsaved work is lost.".into()] } else { vec![] },
+                chips: plan.details(),
+                cancel: self.i18n.t("cancel"),
+                confirm: if force { self.i18n.t("force_quit") } else { self.i18n.t("quit") },
+                confirm_color: if force { pal.danger } else { pal.accent },
+                enter_confirms: true,
+            };
+            match dialog::show(ctx, &d) {
                 Some(true) => {
                     let o = actions::execute(actions::confirm(plan, HumanYes::from_ui_click()));
                     self.toast(o.message);
@@ -1096,22 +1109,23 @@ impl PulseApp {
             return;
         }
         if let Some(req) = self.pending.first().cloned() {
-            let mut decided: Option<bool> = None;
-            egui::Modal::new(egui::Id::new("pending")).show(ctx, |ui| {
-                ui.set_max_width(480.0);
-                ui.heading("An assistant asks to stop something");
-                ui.label(RichText::new(format!("Request from {} (MCP)", req.source)).weak());
-                ui.label(&req.summary);
-                ui.horizontal(|ui| {
-                    if ui.button("Deny").clicked() {
-                        decided = Some(false);
-                    }
-                    if ui.button(RichText::new("Allow").strong()).clicked() {
-                        decided = Some(true);
-                    }
-                });
-            });
-            if let Some(yes) = decided {
+            let force = req.plan.mode == Mode::ForceQuit;
+            let tone = if force { pal.danger } else { pal.warn };
+            let d = Dialog {
+                id: "pending",
+                icon: DialogIcon::Warning(tone),
+                title: "An assistant asks to stop something".into(),
+                subject: Some(req.plan.headline()),
+                lines: vec![format!("Request from {} (MCP)", req.source)],
+                chips: req.plan.details(),
+                cancel: "Deny".into(),
+                confirm: "Allow".into(),
+                confirm_color: if force { pal.danger } else { pal.accent },
+                // Unlike the quit confirmation, this one appears unprompted: a stray Return
+                // must never approve it.
+                enter_confirms: false,
+            };
+            if let Some(yes) = dialog::show(ctx, &d) {
                 let r = actions::resolve_pending(req, yes.then(HumanYes::from_ui_click));
                 if let Ok(r) = r {
                     self.toast(r.outcome.map(|o| o.message).unwrap_or_else(|| "Request denied.".into()));
@@ -1261,6 +1275,6 @@ impl eframe::App for PulseApp {
                 Tab::Settings => self.settings_tab(ui, ctx),
             });
         });
-        self.dialogs(ctx);
+        self.dialogs(ctx, &snap);
     }
 }

@@ -11,7 +11,8 @@
   <key>CFBundleVersion</key><string>__VERSION__</string>
   <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>LSMinimumSystemVersion</key><string>15.0</string>
-  <!-- Menu bar agent: no Dock icon. The window process switches itself to a regular app. -->
+  <!-- Menu bar agent: no Dock icon. The window process switches itself to a regular app
+       (Dock icon + Cmd-Tab while open) in gui::become_regular_app. -->
   <key>LSUIElement</key><true/>
   <key>NSHighResolutionCapable</key><true/>
   <key>NSHumanReadableCopyright</key><string>PulseBar. All data stays on this Mac.</string>

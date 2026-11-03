@@ -50,17 +50,48 @@ pub struct Plan {
 impl Plan {
     /// What the confirmation dialog shows.
     pub fn summary(&self) -> String {
-        let verb = match self.mode {
-            Mode::Quit => "Quit",
-            Mode::ForceQuit => "Force quit",
-        };
-        let what = if self.pids.len() > 1 { format!("{} processes", self.pids.len()) } else { "1 process".into() };
-        let mut s = format!("{verb} {} ({what})? Frees about {}", self.title, format_bytes(self.mem_bytes as f64));
+        let mut s = format!("{} ({})? Frees about {}", self.verb_title(), self.process_label(), format_bytes(self.mem_bytes as f64));
         if !self.ports.is_empty() {
             s.push_str(&format!(" and port{} {}", if self.ports.len() > 1 { "s" } else { "" }, join_ports(&self.ports)));
         }
         s.push('.');
         s
+    }
+
+    fn verb(&self) -> &'static str {
+        match self.mode {
+            Mode::Quit => "Quit",
+            Mode::ForceQuit => "Force quit",
+        }
+    }
+
+    fn verb_title(&self) -> String {
+        format!("{} {}", self.verb(), self.title)
+    }
+
+    fn process_label(&self) -> String {
+        if self.pids.len() > 1 { format!("{} processes", self.pids.len()) } else { "1 process".into() }
+    }
+
+    /// Dialog title: "Quit Brave Browser?" / "Force quit node (pid 42)?".
+    pub fn headline(&self) -> String {
+        format!("{}?", self.verb_title())
+    }
+
+    /// The details a confirmation shows as separate chips: process count (when there are
+    /// processes), memory freed, and the ports that become free.
+    pub fn details(&self) -> Vec<String> {
+        let mut v = vec![];
+        if !self.pids.is_empty() {
+            v.push(self.process_label());
+        }
+        v.push(format!("Frees {}", format_bytes(self.mem_bytes as f64)));
+        match self.ports.len() {
+            0 => {}
+            1 => v.push(format!("Port {}", self.ports[0])),
+            _ => v.push(format!("Ports {}", join_ports(&self.ports))),
+        }
+        v
     }
 }
 
@@ -348,5 +379,22 @@ mod tests {
         let p = plan(&s, Target::Pid(50), Mode::Quit).unwrap();
         assert_eq!(p.pids, vec![50]);
         assert!(p.summary().starts_with("Quit node (pid 50) (1 process)?"));
+    }
+
+    #[test]
+    fn plan_summary_and_structured_details() {
+        let mut p = Plan { target: Target::App("x".into()), mode: Mode::Quit, title: "Brave".into(), pids: vec![1, 2, 3], mem_bytes: 4_900_000, ports: vec![3000, 8000] };
+        assert_eq!(p.summary(), "Quit Brave (3 processes)? Frees about 4.9 MB and ports 3000, 8000.");
+        assert_eq!(p.headline(), "Quit Brave?");
+        assert_eq!(p.details(), vec!["3 processes", "Frees 4.9 MB", "Ports 3000, 8000"]);
+        p.mode = Mode::ForceQuit;
+        p.pids = vec![7];
+        p.ports = vec![5037];
+        assert_eq!(p.summary(), "Force quit Brave (1 process)? Frees about 4.9 MB and port 5037.");
+        assert_eq!(p.headline(), "Force quit Brave?");
+        assert_eq!(p.details(), vec!["1 process", "Frees 4.9 MB", "Port 5037"]);
+        p.pids.clear();
+        p.ports.clear();
+        assert_eq!(p.details(), vec!["Frees 4.9 MB"]);
     }
 }

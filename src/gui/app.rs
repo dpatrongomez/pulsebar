@@ -758,12 +758,49 @@ impl PulseApp {
         }
     }
 
+    /// Fixed-width, vertically centred cell so the columns of a settings row line up.
+    fn settings_cell<R>(ui: &mut egui::Ui, width: f32, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
+        let size = Vec2::new(width, 28.0);
+        ui.allocate_ui_with_layout(size, egui::Layout::left_to_right(Align::Center), |ui| {
+            ui.set_min_size(size);
+            add(ui)
+        })
+        .inner
+    }
+
+    /// Hairline between list rows.
+    fn settings_divider(ui: &mut egui::Ui) {
+        let r = ui.available_rect_before_wrap();
+        let c = ui.visuals().widgets.noninteractive.bg_stroke.color.gamma_multiply(0.6);
+        ui.painter().hline(r.x_range(), ui.cursor().top() + 1.0, egui::Stroke::new(1.0, c));
+        ui.add_space(3.0);
+    }
+
+    /// Up / down chevrons pinned to the right edge of a row; returns the requested move.
+    fn move_buttons(ui: &mut egui::Ui, i: usize, n: usize, what: &str) -> Option<(usize, usize)> {
+        let mut mv = None;
+        ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
+            let down_tip = format!("Move {what} down");
+            let up_tip = format!("Move {what} up");
+            ui.add_enabled_ui(i + 1 < n, |ui| {
+                if widgets::icon_button(ui, widgets::ActionIcon::MoveDown, ui.visuals().strong_text_color(), &down_tip).clicked() {
+                    mv = Some((i, i + 1));
+                }
+            });
+            ui.add_enabled_ui(i > 0, |ui| {
+                if widgets::icon_button(ui, widgets::ActionIcon::MoveUp, ui.visuals().strong_text_color(), &up_tip).clicked() {
+                    mv = Some((i, i - 1));
+                }
+            });
+        });
+        mv
+    }
+
     fn settings_tab(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         let mut changed = false;
         let s = &mut self.settings;
-        widgets::card(ui, |ui| {
-            ui.heading("Units");
-            ui.horizontal(|ui| {
+        Self::section(ui, "Units", "", |ui| {
+            ui.horizontal_wrapped(|ui| {
                 changed |= ui.radio_value(&mut s.units.temperature, TempUnit::Celsius, "°C").changed();
                 changed |= ui.radio_value(&mut s.units.temperature, TempUnit::Fahrenheit, "°F").changed();
                 ui.separator();
@@ -774,20 +811,20 @@ impl PulseApp {
                 changed |= ui.radio_value(&mut s.units.cpu, CpuUnit::PerCore, "Per core").changed();
             });
         });
-        widgets::card(ui, |ui| {
-            ui.heading("Appearance");
-            ui.horizontal(|ui| {
+        Self::section(ui, "Appearance", "", |ui| {
+            ui.horizontal_wrapped(|ui| {
                 changed |= ui.radio_value(&mut s.theme, Theme::Monochrome, "Monochrome").changed();
                 changed |= ui.radio_value(&mut s.theme, Theme::Brand, "Brand colour").changed();
                 changed |= ui.radio_value(&mut s.theme, Theme::ColorBlind, "Colour-blind safe").changed();
             });
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 changed |= ui.radio_value(&mut s.number_font, NumberFont::Proportional, "Proportional numbers").changed();
                 changed |= ui.radio_value(&mut s.number_font, NumberFont::Monospace, "Monospaced numbers").changed();
                 changed |= ui.checkbox(&mut s.compact, "Compact density").changed();
             });
+            ui.add_space(4.0);
             ui.horizontal(|ui| {
-                ui.label("Language");
+                ui.label(RichText::new("Language").weak());
                 let cur = s.language.clone().unwrap_or_else(|| "System".into());
                 egui::ComboBox::from_id_salt("lang").selected_text(cur).show_ui(ui, |ui| {
                     changed |= ui.selectable_value(&mut s.language, None, "System").changed();
@@ -797,38 +834,45 @@ impl PulseApp {
                 });
             });
         });
-        widgets::card(ui, |ui| {
-            ui.heading("Menu bar");
+        Self::section(ui, "Menu bar", "", |ui| {
             let mut mv: Option<(usize, usize)> = None;
             let n = s.menubar.len();
             for (i, it) in s.menubar.iter_mut().enumerate() {
+                if i > 0 {
+                    Self::settings_divider(ui);
+                }
                 ui.horizontal(|ui| {
-                    changed |= ui.checkbox(&mut it.visible, it.metric.label()).changed();
-                    egui::ComboBox::from_id_salt(format!("disp{i}"))
-                        .selected_text(match it.display {
-                            MenuDisplay::Number => "Number",
-                            MenuDisplay::Sparkline => "Graph",
-                            MenuDisplay::Both => "Both",
-                        })
-                        .show_ui(ui, |ui| {
-                            changed |= ui.selectable_value(&mut it.display, MenuDisplay::Number, "Number").changed();
-                            changed |= ui.selectable_value(&mut it.display, MenuDisplay::Sparkline, "Graph").changed();
-                            changed |= ui.selectable_value(&mut it.display, MenuDisplay::Both, "Both").changed();
-                        });
-                    changed |= ui.checkbox(&mut it.framed, "Framed").changed();
-                    let mut has = it.threshold.is_some();
-                    if ui.checkbox(&mut has, "Red above").changed() {
-                        it.threshold = if has { Some(it.metric.default_threshold().unwrap_or(80.0)) } else { None };
-                        changed = true;
-                    }
-                    if let Some(t) = it.threshold.as_mut() {
-                        changed |= ui.add(egui::DragValue::new(t).speed(1.0)).changed();
-                    }
-                    if ui.add_enabled(i > 0, egui::Button::new("↑")).clicked() {
-                        mv = Some((i, i - 1));
-                    }
-                    if ui.add_enabled(i + 1 < n, egui::Button::new("↓")).clicked() {
-                        mv = Some((i, i + 1));
+                    ui.spacing_mut().item_spacing.x = 10.0;
+                    Self::settings_cell(ui, 140.0, |ui| changed |= ui.checkbox(&mut it.visible, it.metric.label()).changed());
+                    Self::settings_cell(ui, 104.0, |ui| {
+                        egui::ComboBox::from_id_salt(format!("disp{i}"))
+                            .width(92.0)
+                            .selected_text(match it.display {
+                                MenuDisplay::Number => "Number",
+                                MenuDisplay::Sparkline => "Graph",
+                                MenuDisplay::Both => "Both",
+                            })
+                            .show_ui(ui, |ui| {
+                                changed |= ui.selectable_value(&mut it.display, MenuDisplay::Number, "Number").changed();
+                                changed |= ui.selectable_value(&mut it.display, MenuDisplay::Sparkline, "Graph").changed();
+                                changed |= ui.selectable_value(&mut it.display, MenuDisplay::Both, "Both").changed();
+                            });
+                    });
+                    Self::settings_cell(ui, 84.0, |ui| changed |= ui.checkbox(&mut it.framed, "Framed").changed());
+                    Self::settings_cell(ui, 112.0, |ui| {
+                        let mut has = it.threshold.is_some();
+                        if ui.checkbox(&mut has, "Red above").changed() {
+                            it.threshold = if has { Some(it.metric.default_threshold().unwrap_or(80.0)) } else { None };
+                            changed = true;
+                        }
+                    });
+                    Self::settings_cell(ui, 64.0, |ui| {
+                        if let Some(t) = it.threshold.as_mut() {
+                            changed |= ui.add(egui::DragValue::new(t).speed(1.0)).changed();
+                        }
+                    });
+                    if let Some(m) = Self::move_buttons(ui, i, n, it.metric.label()) {
+                        mv = Some(m);
                     }
                 });
             }
@@ -837,20 +881,22 @@ impl PulseApp {
                 changed = true;
             }
         });
-        widgets::card(ui, |ui| {
-            ui.heading("Tabs");
+        Self::section(ui, "Tabs", "", |ui| {
             let mut mv: Option<(usize, usize)> = None;
             let n = s.tabs.len();
             let i18n = I18n::new(s.language.as_deref());
             for (i, t) in s.tabs.iter_mut().enumerate() {
+                if i > 0 {
+                    Self::settings_divider(ui);
+                }
                 ui.horizontal(|ui| {
                     let enabled = t.tab != Tab::Settings;
-                    changed |= ui.add_enabled(enabled, egui::Checkbox::new(&mut t.visible, i18n.t(t.tab.key()))).changed();
-                    if ui.add_enabled(i > 0, egui::Button::new("↑")).clicked() {
-                        mv = Some((i, i - 1));
-                    }
-                    if ui.add_enabled(i + 1 < n, egui::Button::new("↓")).clicked() {
-                        mv = Some((i, i + 1));
+                    let label = i18n.t(t.tab.key());
+                    Self::settings_cell(ui, 200.0, |ui| {
+                        changed |= ui.add_enabled(enabled, egui::Checkbox::new(&mut t.visible, label.clone())).changed();
+                    });
+                    if let Some(m) = Self::move_buttons(ui, i, n, &label) {
+                        mv = Some(m);
                     }
                 });
             }
@@ -858,13 +904,14 @@ impl PulseApp {
                 s.move_tab(a, b);
                 changed = true;
             }
-            if ui.button(i18n.t("reset_layout")).clicked() {
+            ui.add_space(10.0);
+            let reset = egui::Button::new(i18n.t("reset_layout")).corner_radius(8.0).min_size(Vec2::new(0.0, 28.0));
+            if ui.add(reset).clicked() {
                 s.reset_layout();
                 changed = true;
             }
         });
-        widgets::card(ui, |ui| {
-            ui.heading("History & alerts");
+        Self::section(ui, "History & alerts", "", |ui| {
             ui.horizontal(|ui| {
                 ui.label("Keep history for");
                 for (r, l) in [(Retention::Days30, "30 days"), (Retention::Days90, "90 days"), (Retention::Months6, "6 months"), (Retention::Year1, "1 year")] {
@@ -889,8 +936,7 @@ impl PulseApp {
                 }
             });
         });
-        widgets::card(ui, |ui| {
-            ui.heading("AI plans (local only)");
+        Self::section(ui, "AI plans (local only)", "", |ui| {
             let mut remove = None;
             for (i, p) in s.plans.iter_mut().enumerate() {
                 ui.horizontal(|ui| {
@@ -934,8 +980,7 @@ impl PulseApp {
             ui.label(RichText::new("Codex usage is read from ~/.codex/sessions; Claude from ~/.claude/projects. No provider is contacted.").small().weak());
         });
         let mut copy = None;
-        widgets::card(ui, |ui| {
-            ui.heading("MCP server");
+        Self::section(ui, "MCP server", "", |ui| {
             changed |= ui.checkbox(&mut s.mcp_enabled, "Enable MCP server (stdio) — off by default").changed();
             let exe = std::env::current_exe().map(|p| p.display().to_string()).unwrap_or("pulsebar".into());
             let cmd = format!("claude mcp add pulsebar -- \"{exe}\" mcp");

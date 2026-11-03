@@ -24,6 +24,7 @@ use crate::settings::{MenuDisplay, NumberFont, PlanConfig, Retention, Settings, 
 use crate::units::{CpuUnit, DataUnit, TempUnit, format_duration};
 use crate::{docker, limits, output, paths, projects, share_card, sys};
 
+mod sidebar;
 mod tabs;
 
 struct Stat {
@@ -1223,30 +1224,7 @@ impl eframe::App for PulseApp {
             return;
         };
 
-        egui::TopBottomPanel::top("tabs").show_separator_line(false).show(ctx, |ui| {
-            ui.add_space(8.0);
-            let dark = ui.visuals().dark_mode;
-            let strip = if dark { Color32::from_rgb(28, 28, 31) } else { Color32::from_rgb(230, 230, 235) };
-            let accent = widgets::metric_color(self.settings.theme, dark, MetricKind::Cpu);
-            egui::Frame::new().fill(strip).corner_radius(12.0).inner_margin(4.0).show(ui, |ui| {
-                ui.horizontal_wrapped(|ui| {
-                    ui.spacing_mut().item_spacing.x = 2.0;
-                    let tabs = self.settings.tabs.clone();
-                    for t in tabs.iter().filter(|t| t.visible) {
-                        let selected = self.tab == t.tab;
-                        let text = RichText::new(format!("{}  {}", tab_glyph(t.tab), self.i18n.t(t.tab.key()))).size(13.0);
-                        let text = if selected { text.color(accent) } else { text };
-                        let fill = if selected { accent.gamma_multiply(0.18) } else { Color32::TRANSPARENT };
-                        let b = egui::Button::new(text).fill(fill).stroke(egui::Stroke::NONE).corner_radius(9.0).min_size(Vec2::new(0.0, 30.0));
-                        if ui.add(b).clicked() {
-                            self.tab = t.tab;
-                            self.highlight = None;
-                        }
-                    }
-                });
-            });
-            ui.add_space(6.0);
-        });
+        self.sidebar(ctx, &snap);
         if !self.toasts.is_empty() {
             egui::TopBottomPanel::bottom("toasts").show(ctx, |ui| {
                 for (_, t) in &self.toasts {

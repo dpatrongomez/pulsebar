@@ -214,7 +214,7 @@ fn run(sh: Arc<Shared>, settings: Settings) {
             if !fired.is_empty() {
                 if st.notifications {
                     for a in &fired {
-                        alerts::notify(if a.app_name.is_empty() { "Alert" } else { &a.app_name }, &a.message);
+                        alerts::notify_alert(a);
                     }
                 }
                 let mut all = read_alerts();

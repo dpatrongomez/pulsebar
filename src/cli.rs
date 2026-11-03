@@ -56,6 +56,9 @@ pub enum Command {
         tab: String,
         #[arg(long)]
         app: Option<String>,
+        /// Also ask to quit `--app` (opens the confirmation dialog).
+        #[arg(long)]
+        quit: bool,
     },
     /// Machine summary.
     Status,

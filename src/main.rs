@@ -6,9 +6,9 @@ use pulsebar::cli::{Cli, Command};
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     #[cfg(feature = "gui")]
-    if let Some(Command::Window { tab, app }) = &cli.command {
+    if let Some(Command::Window { tab, app, quit }) = &cli.command {
         let tab = serde_json::from_value(serde_json::Value::String(tab.clone())).unwrap_or(pulsebar::settings::Tab::Overview);
-        return pulsebar::gui::run_window(tab, app.clone());
+        return pulsebar::gui::run_window(tab, app.clone(), *quit);
     }
     let gui = match &cli.command {
         Some(Command::App) => true,

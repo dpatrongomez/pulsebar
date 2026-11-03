@@ -5,6 +5,7 @@
 mod app;
 mod dialog;
 mod icons;
+pub mod notify;
 pub mod tray;
 mod widgets;
 
@@ -20,6 +21,9 @@ use crate::{actions, paths, sys};
 pub struct Nav {
     pub tab: Tab,
     pub app: Option<String>,
+    /// Also open the quit confirmation for `app` (never quits without that confirmation).
+    #[serde(default)]
+    pub quit: bool,
     pub at_ms: i64,
 }
 
@@ -56,7 +60,13 @@ fn window_running() -> bool {
 
 /// Open (or focus) the window on a tab, optionally scrolled to an app.
 pub fn open_window(tab: Tab, app: Option<String>) {
-    let nav = Nav { tab, app: app.clone(), at_ms: sys::now_ms() };
+    open_window_with(tab, app, false);
+}
+
+/// Like `open_window`; with `quit` the window also shows the quit confirmation for `app`.
+pub fn open_window_with(tab: Tab, app: Option<String>, quit: bool) {
+    let quit = quit && app.is_some();
+    let nav = Nav { tab, app: app.clone(), quit, at_ms: sys::now_ms() };
     let _ = paths::ensure_dirs();
     let _ = std::fs::write(paths::nav_file(), serde_json::to_vec(&nav).unwrap_or_default());
     if window_running() {
@@ -68,6 +78,9 @@ pub fn open_window(tab: Tab, app: Option<String>) {
         cmd.args(["window", "--tab", &tab_s]);
         if let Some(a) = app {
             cmd.args(["--app", &a]);
+        }
+        if quit {
+            cmd.arg("--quit");
         }
         let _ = cmd.spawn();
     }
@@ -97,6 +110,7 @@ pub fn run_agent() -> anyhow::Result<()> {
                 }
             }
         }));
+        notify::install();
         tray::install(shared.clone());
         tray_icon::menu::MenuEvent::set_event_handler(Some(|e: tray_icon::menu::MenuEvent| {
             let id = e.id.0.clone();
@@ -146,7 +160,7 @@ fn app_icon() -> eframe::egui::IconData {
 }
 
 /// The window process.
-pub fn run_window(tab: Tab, app: Option<String>) -> anyhow::Result<()> {
+pub fn run_window(tab: Tab, app: Option<String>, quit: bool) -> anyhow::Result<()> {
     let _ = paths::ensure_dirs();
     let _ = std::fs::write(paths::window_pid_file(), std::process::id().to_string());
     let settings = Settings::load();
@@ -169,9 +183,22 @@ pub fn run_window(tab: Tab, app: Option<String>) -> anyhow::Result<()> {
                 become_regular_app();
             }
             show_app();
-            Ok(Box::new(app::PulseApp::new(cc, shared, tab, app)))
+            Ok(Box::new(app::PulseApp::new(cc, shared, tab, app, quit)))
         }),
     );
     let _ = std::fs::remove_file(paths::window_pid_file());
     r.map_err(|e| anyhow::anyhow!("{e}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn nav_without_quit_field_still_parses() {
+        let n: Nav = serde_json::from_str(r#"{"tab":"memory","app":"bundle:com.x","at_ms":5}"#).unwrap();
+        assert!(!n.quit);
+        let n: Nav = serde_json::from_str(r#"{"tab":"memory","app":"bundle:com.x","quit":true,"at_ms":5}"#).unwrap();
+        assert!(n.quit && n.tab == Tab::Memory);
+    }
 }

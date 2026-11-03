@@ -245,7 +245,18 @@ impl AlertEngine {
     }
 }
 
-/// Local notification (osascript; no network). Actions are offered in the app's alert banner.
+/// Notify about a fired alert: a native notification with actions (see `gui::notify`) when the
+/// app is bundled and the user allows it, otherwise the osascript fallback.
+pub fn notify_alert(a: &Alert) {
+    #[cfg(all(feature = "gui", target_os = "macos"))]
+    if crate::gui::notify::deliver(a) {
+        return;
+    }
+    notify(if a.app_name.is_empty() { "Alert" } else { &a.app_name }, &a.message);
+}
+
+/// Fallback notification (osascript; no network), attributed to Script Editor. Actions are only
+/// offered in the app's alert banner.
 pub fn notify(title: &str, body: &str) {
     let esc = |s: &str| s.replace('\\', "\\\\").replace('"', "\\\"");
     let script = format!("display notification \"{}\" with title \"PulseBar\" subtitle \"{}\"", esc(body), esc(title));

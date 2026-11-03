@@ -35,6 +35,9 @@ const TABLE: &[Row] = &[
     ("stop",           ["Stop…","Detener…","Stoppen…","Arrêter…","Ferma…","Stoppen…","Parar…","Stoppa…","Зупинити…","停止…","중지…","停止…"]),
     ("stop_all",       ["Stop All…","Detener todo…","Alle stoppen…","Tout arrêter…","Ferma tutto…","Alles stoppen…","Parar tudo…","Stoppa alla…","Зупинити все…","すべて停止…","모두 중지…","全部停止…"]),
     ("reset_layout",   ["Reset layout","Restablecer diseño","Layout zurücksetzen","Réinitialiser la disposition","Ripristina layout","Indeling herstellen","Redefinir layout","Återställ layout","Скинути розкладку","レイアウトをリセット","레이아웃 재설정","重置布局"]),
+    ("notif.show",    ["Show","Mostrar","Anzeigen","Afficher","Mostra","Toon","Mostrar","Visa","Показати","表示","보기","显示"]),
+    ("notif.quit",    ["Quit app…","Salir de la app…","App beenden…","Quitter l’app…","Esci dall’app…","App stoppen…","Encerrar app…","Avsluta appen…","Завершити програму…","アプリを終了…","앱 종료…","退出应用…"]),
+    ("notif.snooze",  ["Snooze 1 h","Posponer 1 h","1 Std. später","Reporter 1 h","Posticipa 1 h","1 uur uitstellen","Adiar 1 h","Snooza 1 h","Відкласти на 1 год","1時間スヌーズ","1시간 미루기","延后 1 小时"]),
 ];
 
 fn index_of(lang: &str) -> usize {
@@ -90,5 +93,6 @@ mod tests {
         assert_eq!(I18n::new(Some("zh-Hans-CN")).t("tab.memory"), "内存");
         assert_eq!(I18n::new(Some("xx")).t("peak"), "Peak");
         assert_eq!(I18n::new(Some("en")).t("missing.key"), "missing.key");
+        assert_eq!(I18n::new(Some("es")).t("notif.snooze"), "Posponer 1 h");
     }
 }

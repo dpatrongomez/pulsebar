@@ -124,6 +124,8 @@ pub struct PulseApp {
     scroll_to_highlight: bool,
     inspector: Option<InspectorState>,
     confirm: Option<Plan>,
+    /// App whose quit confirmation was requested (notification action); opened once sampled.
+    quit_request: Option<String>,
     pending: Vec<PendingRequest>,
     last_pending_poll: Instant,
     toasts: Vec<(Instant, String)>,
@@ -154,12 +156,13 @@ fn local_midnight() -> i64 {
 }
 
 impl PulseApp {
-    pub fn new(cc: &eframe::CreationContext<'_>, shared: Arc<Shared>, tab: Tab, app_key: Option<String>) -> Self {
+    pub fn new(cc: &eframe::CreationContext<'_>, shared: Arc<Shared>, tab: Tab, app_key: Option<String>, quit: bool) -> Self {
         let settings = shared.settings.read().unwrap().clone();
         let app = Self {
             i18n: I18n::new(settings.language.as_deref()),
             tab,
             scroll_to_highlight: app_key.is_some(),
+            quit_request: app_key.clone().filter(|_| quit),
             highlight: app_key,
             inspector: None,
             confirm: None,
@@ -254,6 +257,7 @@ impl PulseApp {
             self.nav_seen = nav.at_ms;
             self.tab = nav.tab;
             self.scroll_to_highlight = nav.app.is_some();
+            self.quit_request = nav.app.clone().filter(|_| nav.quit);
             self.highlight = nav.app;
             show_app();
         }
@@ -1222,6 +1226,10 @@ impl eframe::App for PulseApp {
             });
             return;
         };
+
+        if let Some(k) = self.quit_request.take() {
+            self.ask(&snap, Target::App(k), Mode::Quit);
+        }
 
         egui::TopBottomPanel::top("tabs").show_separator_line(false).show(ctx, |ui| {
             ui.add_space(8.0);

@@ -13,7 +13,8 @@ pub enum LoginStatus {
     Enabled,
     /// Not registered (the default).
     Disabled,
-    /// Registered, but the user has to approve it in System Settings → Login Items.
+    /// Registered, but the user has not approved it (or revoked consent) in System Settings →
+    /// Login Items: it will NOT open at login until they do.
     RequiresApproval,
     /// Not running from an app bundle: can't be registered.
     Unbundled,
@@ -22,9 +23,20 @@ pub enum LoginStatus {
 }
 
 impl LoginStatus {
-    /// Whether the app will (try to) open at login: the switch position.
+    /// Whether the app will open at login: the switch position. `RequiresApproval` is off,
+    /// because the system will not launch it until the user approves it again.
     pub fn is_on(&self) -> bool {
-        matches!(self, LoginStatus::Enabled | LoginStatus::RequiresApproval)
+        matches!(self, LoginStatus::Enabled)
+    }
+    /// Stable machine-readable token for `--json` (never reworded).
+    pub fn token(&self) -> &'static str {
+        match self {
+            LoginStatus::Enabled => "enabled",
+            LoginStatus::Disabled => "disabled",
+            LoginStatus::RequiresApproval => "requires_approval",
+            LoginStatus::Unbundled => "unbundled",
+            LoginStatus::Unsupported => "unsupported",
+        }
     }
     /// Whether the user can change the setting from here.
     pub fn can_change(&self) -> bool {
@@ -47,24 +59,82 @@ pub fn exe_in_bundle(exe: &Path) -> bool {
     exe.to_string_lossy().contains(".app/Contents/MacOS/")
 }
 
+/// Where to re-run when started through a symlink into the bundle (the Homebrew `pulsebar`
+/// link). `Bundle.main` only resolves to the app when the real binary is the running process,
+/// so `SMAppService.mainApp` needs a re-exec. `None` when already running from the bundle, when
+/// the real binary is not in a bundle either, or when this already is the re-executed process.
+pub fn reexec_target(exe: &Path, real: &Path, already_reexeced: bool) -> Option<std::path::PathBuf> {
+    (!already_reexeced && real != exe && !exe_in_bundle(exe) && exe_in_bundle(real)).then(|| real.to_path_buf())
+}
+
+/// Re-run the real binary with the same arguments when invoked through a symlink into the
+/// bundle. Replaces the process on success (never returns); returns `Ok(())` when not needed.
+/// A marker env var guarantees a single hop.
+#[cfg(unix)]
+pub fn reexec_from_symlink() -> std::io::Result<()> {
+    use std::os::unix::process::CommandExt;
+    const MARK: &str = "PULSEBAR_LOGIN_REEXEC";
+    let exe = std::env::current_exe()?;
+    let real = std::fs::canonicalize(&exe)?;
+    match reexec_target(&exe, &real, std::env::var_os(MARK).is_some()) {
+        Some(real) => Err(std::process::Command::new(real).args(std::env::args_os().skip(1)).env(MARK, "1").exec()),
+        None => Ok(()),
+    }
+}
+
+#[cfg(not(unix))]
+pub fn reexec_from_symlink() -> std::io::Result<()> {
+    Ok(())
+}
+
 fn bundled() -> bool {
     std::env::current_exe().is_ok_and(|p| exe_in_bundle(&p))
 }
 
+/// Why registering/unregistering failed. The GUI shows `localized` (system language); the CLI
+/// shows [`SetError::cli_message`] (always English).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SetError {
+    /// NSError domain; empty for errors that did not come from the system.
+    pub domain: String,
+    pub code: isize,
+    pub localized: String,
+}
+
+/// `kSMErrorLaunchDeniedByUser` (ServiceManagement/SMErrors.h).
+const LAUNCH_DENIED_BY_USER: isize = 10;
+
+impl SetError {
+    /// An error that is not from the system: the same (English) text everywhere.
+    pub fn plain(msg: impl Into<String>) -> Self {
+        Self { domain: String::new(), code: 0, localized: msg.into() }
+    }
+    /// English hint for the cases where the user can fix it.
+    pub fn hint(&self) -> Option<&'static str> {
+        (self.domain == "SMAppServiceErrorDomain" && self.code == LAUNCH_DENIED_BY_USER)
+            .then_some("approve PulseBar in System Settings → General → Login Items")
+    }
+    /// English text with domain and code (the localized description is never used here).
+    pub fn cli_message(&self) -> String {
+        if self.domain.is_empty() {
+            return self.localized.clone();
+        }
+        let base = format!("{} error {}", self.domain, self.code);
+        match self.hint() {
+            Some(h) => format!("{base} ({h})"),
+            None => base,
+        }
+    }
+}
+
 #[cfg(target_os = "macos")]
 mod sys_impl {
-    use super::LoginStatus;
+    use super::{LoginStatus, SetError};
     use objc2_service_management::{SMAppService, SMAppServiceStatus};
 
-    // SMAppService is macOS 13+. The class is looked up at runtime so older systems degrade.
-    fn available() -> bool {
-        objc2::runtime::AnyClass::get(c"SMAppService").is_some()
-    }
-
+    // SMAppService needs macOS 13+; the app requires 15 (Info.plist, cask), and unbundled
+    // processes never get here, so no runtime availability check is needed.
     pub fn status() -> LoginStatus {
-        if !available() {
-            return LoginStatus::Unsupported;
-        }
         let s = unsafe { SMAppService::mainAppService().status() };
         match s {
             SMAppServiceStatus::Enabled => LoginStatus::Enabled,
@@ -75,27 +145,25 @@ mod sys_impl {
         }
     }
 
-    pub fn set(on: bool) -> Result<(), String> {
+    pub fn set(on: bool) -> Result<(), SetError> {
         let svc = unsafe { SMAppService::mainAppService() };
         let r = unsafe { if on { svc.registerAndReturnError() } else { svc.unregisterAndReturnError() } };
-        r.map_err(|e| e.localizedDescription().to_string())
+        r.map_err(|e| SetError { domain: e.domain().to_string(), code: e.code(), localized: e.localizedDescription().to_string() })
     }
 
     pub fn open_settings() {
-        if available() {
-            unsafe { SMAppService::openSystemSettingsLoginItems() };
-        }
+        unsafe { SMAppService::openSystemSettingsLoginItems() };
     }
 }
 
 #[cfg(not(target_os = "macos"))]
 mod sys_impl {
-    use super::LoginStatus;
+    use super::{LoginStatus, SetError};
     pub fn status() -> LoginStatus {
         LoginStatus::Unsupported
     }
-    pub fn set(_on: bool) -> Result<(), String> {
-        Err("launch at login is only available on macOS".into())
+    pub fn set(_on: bool) -> Result<(), SetError> {
+        Err(SetError::plain("launch at login is only available on macOS"))
     }
     pub fn open_settings() {}
 }
@@ -108,15 +176,24 @@ pub fn status() -> LoginStatus {
     sys_impl::status()
 }
 
+/// Whether register/unregister must be called to reach `on`. The system fails when there is
+/// nothing to change (already registered / not registered), so those cases are no-ops.
+pub fn needs_change(on: bool, current: &LoginStatus) -> bool {
+    !matches!((on, current), (true, LoginStatus::Enabled) | (false, LoginStatus::Disabled))
+}
+
 /// Register or unregister the app, then return the status read back from the system.
-/// The one-time offer is considered answered either way.
-pub fn set_enabled(on: bool) -> Result<LoginStatus, String> {
+/// Asking for the state it already has succeeds without touching the system. The one-time offer
+/// is marked as answered only after success.
+pub fn set_enabled(on: bool) -> Result<LoginStatus, SetError> {
     let st = status();
     if !st.can_change() {
-        return Err(st.describe().to_string());
+        return Err(SetError::plain(st.describe()));
+    }
+    if needs_change(on, &st) {
+        sys_impl::set(on)?;
     }
     mark_offered();
-    sys_impl::set(on)?;
     Ok(status())
 }
 
@@ -129,12 +206,12 @@ fn offered_marker() -> std::path::PathBuf {
     paths::app_support().join(".login_offered")
 }
 
-/// Whether the first-launch banner has already been shown and answered.
+/// Whether the first-launch banner has already been shown.
 pub fn was_offered() -> bool {
     offered_marker().exists()
 }
 
-/// Remember that the first-launch offer has been answered, so it is never shown again.
+/// Remember that the first-launch offer has been made, so it is never shown again.
 pub fn mark_offered() {
     let _ = paths::ensure_dirs();
     let _ = std::fs::write(offered_marker(), b"1");
@@ -158,10 +235,49 @@ mod tests {
     #[test]
     fn switch_semantics() {
         assert!(LoginStatus::Enabled.is_on());
-        assert!(LoginStatus::RequiresApproval.is_on());
+        assert!(!LoginStatus::RequiresApproval.is_on(), "revoked in System Settings: switch is off");
         assert!(!LoginStatus::Disabled.is_on());
         assert!(!LoginStatus::Unbundled.can_change());
         assert!(LoginStatus::RequiresApproval.can_change());
+    }
+
+    #[test]
+    fn idempotent_decision() {
+        use LoginStatus::*;
+        assert!(!needs_change(true, &Enabled));
+        assert!(!needs_change(false, &Disabled));
+        assert!(needs_change(true, &Disabled));
+        assert!(needs_change(false, &Enabled));
+        // Not approved: turning on must reach the system (it reports the denial), off unregisters.
+        assert!(needs_change(true, &RequiresApproval));
+        assert!(needs_change(false, &RequiresApproval));
+    }
+
+    #[test]
+    fn reexec_only_through_a_symlink_and_once() {
+        let link = Path::new("/opt/homebrew/bin/pulsebar");
+        let real = Path::new("/Applications/PulseBar.app/Contents/MacOS/PulseBar");
+        assert_eq!(reexec_target(link, real, false), Some(real.to_path_buf()));
+        assert_eq!(reexec_target(link, real, true), None, "marker set: no second hop");
+        assert_eq!(reexec_target(real, real, false), None, "already the real binary");
+        assert_eq!(reexec_target(real, Path::new("/x/PulseBar.app/Contents/MacOS/PulseBar"), false), None, "already in a bundle");
+        let bare = Path::new("/Users/me/pulsebar/target/debug/pulsebar");
+        assert_eq!(reexec_target(link, bare, false), None, "target is not a bundle");
+    }
+
+    #[test]
+    fn set_error_messages_are_english() {
+        let denied = SetError { domain: "SMAppServiceErrorDomain".into(), code: 10, localized: "No se pudo".into() };
+        assert_eq!(denied.cli_message(), "SMAppServiceErrorDomain error 10 (approve PulseBar in System Settings → General → Login Items)");
+        let other = SetError { domain: "SMAppServiceErrorDomain".into(), code: 1, localized: "No se pudo".into() };
+        assert_eq!(other.cli_message(), "SMAppServiceErrorDomain error 1");
+        assert_eq!(SetError::plain("nope").cli_message(), "nope");
+    }
+
+    #[test]
+    fn status_tokens_are_stable() {
+        assert_eq!(LoginStatus::RequiresApproval.token(), "requires_approval");
+        assert_eq!(LoginStatus::Unbundled.token(), "unbundled");
     }
 
     #[test]

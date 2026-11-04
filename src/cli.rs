@@ -335,12 +335,14 @@ pub fn run(cli: Cli) -> Result<()> {
             println!("{}", path.display());
         }
         Command::Config { action: ConfigAction::Login { state } } => {
+            // Through the Homebrew symlink Bundle.main doesn't resolve to the app: re-run the real binary.
+            login_item::reexec_from_symlink()?;
             let status = match state {
-                Some(s) => login_item::set_enabled(matches!(s, OnOff::On)).map_err(|e| anyhow::anyhow!("could not change login item: {e}"))?,
+                Some(s) => login_item::set_enabled(matches!(s, OnOff::On)).map_err(|e| anyhow::anyhow!("could not change login item: {}", e.cli_message()))?,
                 None => login_item::status(),
             };
             if cli.json {
-                print_json(&serde_json::json!({"login": {"enabled": status.is_on(), "status": status.describe()}}))?;
+                print_json(&views::login(&status))?;
             } else {
                 println!("Open at login: {}", status.describe());
             }

@@ -65,6 +65,7 @@ fn json_documents_validate() {
     json_case("agents", views::agents(&s));
     json_case("limits", views::limits(&s));
     json_case("containers", views::containers(&s));
+    json_case("login", views::login(&pulsebar::login_item::LoginStatus::RequiresApproval));
 }
 
 #[test]

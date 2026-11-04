@@ -1,0 +1,7 @@
+{
+  "login": {
+    "enabled": false,
+    "message": "requires approval (System Settings → General → Login Items)",
+    "status": "requires_approval"
+  }
+}

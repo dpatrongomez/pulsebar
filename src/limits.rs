@@ -13,6 +13,11 @@ use crate::model::{AIPlan, PaceState};
 use crate::settings::PlanConfig;
 use crate::units::format_duration;
 
+/// Pace text when a Claude plan has no token budget / a manual plan has no usage entered.
+/// The GUI translates both (`gui::loc::pace_text`), so they live here as constants.
+pub const PACE_NO_BUDGET: &str = "set a token budget in Settings";
+pub const PACE_NO_USAGE: &str = "enter usage in Settings";
+
 /// Pace given usage, the window length and time to reset.
 pub fn pace(used_pct: f64, window_s: i64, resets_in_s: Option<i64>) -> (PaceState, String) {
     let left = (100.0 - used_pct).max(0.0);
@@ -253,7 +258,7 @@ pub fn compute(plans: &[PlanConfig], home: &Path, now: i64) -> Vec<AIPlan> {
                 let resets_in = resets_at.filter(|r| *r > now).map(|r| r - now);
                 let (state, text) = match used_pct {
                     Some(u) => pace(u, window_s, resets_in),
-                    None => (PaceState::Unknown, "set a token budget in Settings".into()),
+                    None => (PaceState::Unknown, PACE_NO_BUDGET.into()),
                 };
                 out.push(AIPlan {
                     provider: "Claude".into(),
@@ -272,7 +277,7 @@ pub fn compute(plans: &[PlanConfig], home: &Path, now: i64) -> Vec<AIPlan> {
                 let resets_at = cfg.manual_resets_at.map(|r| roll_forward(r, window_s, now));
                 let (state, text) = match cfg.manual_used_pct {
                     Some(u) => pace(u, window_s, resets_at.map(|r| r - now)),
-                    None => (PaceState::Unknown, "enter usage in Settings".into()),
+                    None => (PaceState::Unknown, PACE_NO_USAGE.into()),
                 };
                 let provider = match other {
                     "copilot" => "GitHub Copilot".to_string(),

@@ -1,45 +1,86 @@
-//! Localisation (12 languages). Follows the system language unless overridden in settings.
-//! Strings are kept in a compact table; unknown keys fall back to English, then to the key.
+//! Localisation. English and Spanish are complete; the other languages are partial and fall
+//! back to English key by key. Strings live in `locales/<lang>.toml` (a flat `key = "value"`
+//! subset of TOML, embedded with `include_str!`), so adding a string never means editing code
+//! tables. Plurals use `key.one` / `key.other` pairs (see [`I18n::tn`]).
+//!
+//! CLI and MCP output deliberately never go through here: scripts and golden tests depend on it
+//! staying English.
 
+use std::collections::HashMap;
+use std::sync::OnceLock;
+
+/// Every language that has a locale file. Index 0 is the fallback.
 pub const LANGS: [&str; 12] = ["en", "es", "de", "fr", "it", "nl", "pt-BR", "sv", "uk", "ja", "ko", "zh"];
 
-type Row = (&'static str, [&'static str; 12]);
+/// Languages offered in the picker: complete translations only.
+pub const COMPLETE: [&str; 2] = ["en", "es"];
 
-#[rustfmt::skip]
-const TABLE: &[Row] = &[
-    ("tab.overview",   ["Overview","Resumen","Übersicht","Aperçu","Panoramica","Overzicht","Visão geral","Översikt","Огляд","概要","개요","概览"]),
-    ("tab.cpu",        ["CPU","CPU","CPU","CPU","CPU","CPU","CPU","CPU","ЦП","CPU","CPU","CPU"]),
-    ("tab.memory",     ["Memory","Memoria","Speicher","Mémoire","Memoria","Geheugen","Memória","Minne","Пам’ять","メモリ","메모리","内存"]),
-    ("tab.disk",       ["Disk","Disco","Festplatte","Disque","Disco","Schijf","Disco","Disk","Диск","ディスク","디스크","磁盘"]),
-    ("tab.network",    ["Network","Red","Netzwerk","Réseau","Rete","Netwerk","Rede","Nätverk","Мережа","ネットワーク","네트워크","网络"]),
-    ("tab.gpu",        ["GPU","GPU","GPU","GPU","GPU","GPU","GPU","GPU","ГП","GPU","GPU","GPU"]),
-    ("tab.neural",     ["Neural","Neural","Neural","Neural","Neural","Neural","Neural","Neural","Нейро","ニューラル","뉴럴","神经网络"]),
-    ("tab.battery",    ["Battery","Batería","Batterie","Batterie","Batteria","Batterij","Bateria","Batteri","Батарея","バッテリー","배터리","电池"]),
-    ("tab.sound",      ["Sound","Sonido","Ton","Son","Suono","Geluid","Som","Ljud","Звук","サウンド","사운드","声音"]),
-    ("tab.bluetooth",  ["Bluetooth","Bluetooth","Bluetooth","Bluetooth","Bluetooth","Bluetooth","Bluetooth","Bluetooth","Bluetooth","Bluetooth","Bluetooth","蓝牙"]),
-    ("tab.projects",   ["Projects","Proyectos","Projekte","Projets","Progetti","Projecten","Projetos","Projekt","Проєкти","プロジェクト","프로젝트","项目"]),
-    ("tab.agents",     ["Agents","Agentes","Agenten","Agents","Agenti","Agents","Agentes","Agenter","Агенти","エージェント","에이전트","智能体"]),
-    ("tab.containers", ["Containers","Contenedores","Container","Conteneurs","Container","Containers","Contêineres","Containrar","Контейнери","コンテナ","컨테이너","容器"]),
-    ("tab.history",    ["History","Histórico","Verlauf","Historique","Cronologia","Geschiedenis","Histórico","Historik","Історія","履歴","기록","历史"]),
-    ("tab.settings",   ["Settings","Ajustes","Einstellungen","Réglages","Impostazioni","Instellingen","Ajustes","Inställningar","Налаштування","設定","설정","设置"]),
-    ("now",            ["Now","Ahora","Jetzt","Maintenant","Ora","Nu","Agora","Nu","Зараз","現在","현재","当前"]),
-    ("avg_today",      ["Average today","Media de hoy","Heute im Schnitt","Moyenne du jour","Media di oggi","Gemiddeld vandaag","Média de hoje","Snitt i dag","Середнє сьогодні","今日の平均","오늘 평균","今日平均"]),
-    ("peak",           ["Peak","Pico","Spitze","Pic","Picco","Piek","Pico","Topp","Пік","ピーク","최고","峰值"]),
-    ("top_apps",       ["Top Apps","Apps principales","Top-Apps","Apps principales","App principali","Top-apps","Principais apps","Toppappar","Топ програм","上位アプリ","상위 앱","热门应用"]),
-    ("processes",      ["processes","procesos","Prozesse","processus","processi","processen","processos","processer","процесів","プロセス","프로세스","个进程"]),
-    ("busiest",        ["Busiest Right Now","Más activas ahora","Gerade am aktivsten","Les plus actives","Più attive ora","Nu het drukst","Mais ativos agora","Mest aktiva nu","Найактивніші зараз","現在最も負荷が高い","지금 가장 바쁜 앱","当前最繁忙"]),
-    ("quit",           ["Quit","Salir","Beenden","Quitter","Esci","Stop","Encerrar","Avsluta","Завершити","終了","종료","退出"]),
-    ("force_quit",     ["Force Quit","Forzar salida","Sofort beenden","Forcer à quitter","Uscita forzata","Forceer stop","Forçar encerrar","Tvångsavsluta","Примусово завершити","強制終了","강제 종료","强制退出"]),
-    ("inspect",        ["Inspect","Inspeccionar","Untersuchen","Inspecter","Ispeziona","Inspecteren","Inspecionar","Inspektera","Переглянути","調査","검사","检查"]),
-    ("cancel",         ["Cancel","Cancelar","Abbrechen","Annuler","Annulla","Annuleer","Cancelar","Avbryt","Скасувати","キャンセル","취소","取消"]),
-    ("stop",           ["Stop…","Detener…","Stoppen…","Arrêter…","Ferma…","Stoppen…","Parar…","Stoppa…","Зупинити…","停止…","중지…","停止…"]),
-    ("stop_all",       ["Stop All…","Detener todo…","Alle stoppen…","Tout arrêter…","Ferma tutto…","Alles stoppen…","Parar tudo…","Stoppa alla…","Зупинити все…","すべて停止…","모두 중지…","全部停止…"]),
-    ("reset_layout",   ["Reset layout","Restablecer diseño","Layout zurücksetzen","Réinitialiser la disposition","Ripristina layout","Indeling herstellen","Redefinir layout","Återställ layout","Скинути розкладку","レイアウトをリセット","레이아웃 재설정","重置布局"]),
-    ("search.placeholder", ["Search apps, processes, PID, port…","Buscar apps, procesos, PID, puerto…","Apps, Prozesse, PID, Port suchen…","Rechercher apps, processus, PID, port…","Cerca app, processi, PID, porta…","Zoek apps, processen, PID, poort…","Buscar apps, processos, PID, porta…","Sök appar, processer, PID, port…","Пошук програм, процесів, PID, порту…","アプリ・プロセス・PID・ポートを検索…","앱, 프로세스, PID, 포트 검색…","搜索应用、进程、PID、端口…"]),
-    ("search.no_matches", ["No matches","Sin resultados","Keine Treffer","Aucun résultat","Nessun risultato","Geen resultaten","Nenhum resultado","Inga träffar","Нічого не знайдено","一致なし","일치 항목 없음","无匹配项"]),
-    ("search.apps", ["Apps","Apps","Apps","Apps","App","Apps","Apps","Appar","Застосунки","アプリ","앱","应用"]),
-    ("search.more", ["more","más","weitere","de plus","altri","meer","mais","till","ще","件","개 더","更多"]),
+/// (code, name in its own language) for the translations that are still partial. Shown in the
+/// picker, marked "partial", only when one of them is already selected in `settings.json`.
+pub const PARTIAL: [(&str, &str); 10] = [
+    ("de", "Deutsch"),
+    ("fr", "Français"),
+    ("it", "Italiano"),
+    ("nl", "Nederlands"),
+    ("pt-BR", "Português (Brasil)"),
+    ("sv", "Svenska"),
+    ("uk", "Українська"),
+    ("ja", "日本語"),
+    ("ko", "한국어"),
+    ("zh", "中文"),
 ];
+
+/// The locale sources, in `LANGS` order.
+pub const SOURCES: [&str; 12] = [
+    include_str!("../locales/en.toml"),
+    include_str!("../locales/es.toml"),
+    include_str!("../locales/de.toml"),
+    include_str!("../locales/fr.toml"),
+    include_str!("../locales/it.toml"),
+    include_str!("../locales/nl.toml"),
+    include_str!("../locales/pt-BR.toml"),
+    include_str!("../locales/sv.toml"),
+    include_str!("../locales/uk.toml"),
+    include_str!("../locales/ja.toml"),
+    include_str!("../locales/ko.toml"),
+    include_str!("../locales/zh.toml"),
+];
+
+/// Parse the `key = "value"` subset of TOML used by the locale files: `#` comments, blank lines,
+/// double-quoted values with `\"`, `\\`, `\n` and `\t` escapes. Returns the entries in file order.
+pub fn parse(src: &str) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    for line in src.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let Some((k, v)) = line.split_once('=') else { continue };
+        let v = v.trim();
+        let Some(inner) = v.strip_prefix('"').and_then(|v| v.strip_suffix('"')) else { continue };
+        let mut s = String::with_capacity(inner.len());
+        let mut chars = inner.chars();
+        while let Some(c) = chars.next() {
+            if c != '\\' {
+                s.push(c);
+                continue;
+            }
+            match chars.next() {
+                Some('n') => s.push('\n'),
+                Some('t') => s.push('\t'),
+                Some(o) => s.push(o),
+                None => {}
+            }
+        }
+        out.push((k.trim().to_string(), s));
+    }
+    out
+}
+
+fn tables() -> &'static Vec<HashMap<String, String>> {
+    static T: OnceLock<Vec<HashMap<String, String>>> = OnceLock::new();
+    T.get_or_init(|| SOURCES.iter().map(|s| parse(s).into_iter().collect()).collect())
+}
 
 fn index_of(lang: &str) -> usize {
     let l = lang.replace('_', "-");
@@ -54,16 +95,31 @@ fn index_of(lang: &str) -> usize {
     }
 }
 
-/// Detect the macOS UI language (first of AppleLanguages), falling back to $LANG.
+/// The macOS UI language (first of AppleLanguages), falling back to $LANG. Read once: macOS
+/// applies a language change to an app only after it relaunches anyway.
 pub fn system_language() -> String {
-    #[cfg(target_os = "macos")]
-    if let Ok(out) = std::process::Command::new("defaults").args(["read", "-g", "AppleLanguages"]).output() {
-        let s = String::from_utf8_lossy(&out.stdout);
-        if let Some(first) = s.split('"').nth(1) {
+    static S: OnceLock<String> = OnceLock::new();
+    S.get_or_init(|| {
+        #[cfg(target_os = "macos")]
+        if let Ok(out) = std::process::Command::new("defaults").args(["read", "-g", "AppleLanguages"]).output()
+            && let Some(first) = first_language(&String::from_utf8_lossy(&out.stdout))
+        {
             return first.to_string();
         }
-    }
-    std::env::var("LANG").ok().and_then(|l| l.split('.').next().map(str::to_string)).unwrap_or_else(|| "en".into())
+        std::env::var("LANG").ok().and_then(|l| l.split('.').next().map(str::to_string)).unwrap_or_else(|| "en".into())
+    })
+    .clone()
+}
+
+/// The first language in the old-style plist `defaults read -g AppleLanguages` prints.
+/// `defaults` only quotes values that contain a dash, so `(en, "es-ES")` and `(es)` both occur.
+fn first_language(out: &str) -> Option<&str> {
+    out.lines().map(|l| l.trim().trim_end_matches(',').trim_matches('"')).find(|l| !l.is_empty() && *l != "(" && *l != ")")
+}
+
+/// "System" maps to Spanish when the system prefers `es-*`, English otherwise.
+fn system_index(system: &str) -> usize {
+    if system.replace('_', "-").to_ascii_lowercase().starts_with("es") { 1 } else { 0 }
 }
 
 #[derive(Debug, Clone)]
@@ -72,21 +128,88 @@ pub struct I18n {
 }
 
 impl I18n {
+    /// `None` follows the system language.
     pub fn new(lang: Option<&str>) -> Self {
-        let l = lang.map(str::to_string).unwrap_or_else(system_language);
-        Self { idx: index_of(&l) }
+        match lang {
+            Some(l) => Self { idx: index_of(l) },
+            None => Self::from_system(&system_language()),
+        }
     }
+
+    /// What "System" resolves to for a given macOS language tag.
+    pub fn from_system(system: &str) -> Self {
+        Self { idx: system_index(system) }
+    }
+
+    /// Always English: CLI and MCP output.
+    pub fn english() -> Self {
+        Self { idx: 0 }
+    }
+
     pub fn lang(&self) -> &'static str {
         LANGS[self.idx]
     }
+
+    /// Spanish writes the decimal separator as a comma ("3,07 GB").
+    pub fn decimal_comma(&self) -> bool {
+        matches!(self.lang(), "es" | "de" | "fr" | "it" | "nl" | "pt-BR" | "sv" | "uk")
+    }
+
+    /// Localise the decimal separator of an already formatted number.
+    pub fn num(&self, s: impl Into<String>) -> String {
+        let s = s.into();
+        if self.decimal_comma() { s.replace('.', ",") } else { s }
+    }
+
+    fn lookup(&self, key: &str) -> Option<&'static str> {
+        let t = tables();
+        t[self.idx].get(key).or_else(|| t[0].get(key)).map(String::as_str)
+    }
+
+    /// The string for `key` (English if this language lacks it, the key itself if nobody has it).
     pub fn t(&self, key: &str) -> String {
-        TABLE.iter().find(|(k, _)| *k == key).map(|(_, v)| v[self.idx].to_string()).unwrap_or_else(|| key.to_string())
+        self.lookup(key).map(str::to_string).unwrap_or_else(|| key.to_string())
+    }
+
+    /// `t` with `{name}` placeholders replaced.
+    pub fn tf(&self, key: &str, args: &[(&str, &str)]) -> String {
+        let mut s = self.t(key);
+        for (k, v) in args {
+            s = s.replace(&format!("{{{k}}}"), v);
+        }
+        s
+    }
+
+    /// Plural form: `key.one` when `n == 1`, else `key.other`. `{n}` is filled with `n`.
+    pub fn tn(&self, key: &str, n: usize, args: &[(&str, &str)]) -> String {
+        let k = format!("{key}.{}", if n == 1 { "one" } else { "other" });
+        let n = n.to_string();
+        let mut all: Vec<(&str, &str)> = vec![("n", &n)];
+        all.extend_from_slice(args);
+        self.tf(&k, &all)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeSet;
+
+    fn keys(i: usize) -> BTreeSet<String> {
+        parse(SOURCES[i]).into_iter().map(|(k, _)| k).collect()
+    }
+
+    fn placeholders(s: &str) -> BTreeSet<String> {
+        let mut out = BTreeSet::new();
+        let mut rest = s;
+        while let Some(a) = rest.find('{') {
+            let Some(b) = rest[a..].find('}') else { break };
+            out.insert(rest[a + 1..a + b].to_string());
+            rest = &rest[a + b + 1..];
+        }
+        out
+    }
+
     #[test]
     fn lookups() {
         assert_eq!(I18n::new(Some("es-ES")).t("tab.projects"), "Proyectos");
@@ -94,5 +217,99 @@ mod tests {
         assert_eq!(I18n::new(Some("zh-Hans-CN")).t("tab.memory"), "内存");
         assert_eq!(I18n::new(Some("xx")).t("peak"), "Peak");
         assert_eq!(I18n::new(Some("en")).t("missing.key"), "missing.key");
+    }
+
+    #[test]
+    fn first_language_parses_defaults_output() {
+        // Multi-line, as `defaults read -g AppleLanguages` prints it.
+        assert_eq!(first_language("(\n    en,\n    \"es-ES\"\n)\n"), Some("en"));
+        assert_eq!(first_language("(\n    \"es-ES\",\n    en\n)\n"), Some("es-ES"));
+        assert_eq!(first_language("(\n    es\n)\n"), Some("es"));
+        assert_eq!(first_language("(\n)\n"), None);
+        assert_eq!(first_language(""), None);
+    }
+
+    /// Every non-blank, non-comment line of every locale file must parse (a line such as
+    /// `key = "x" # note` is otherwise dropped silently), and no key may appear twice.
+    #[test]
+    fn every_locale_line_parses_without_duplicates() {
+        for (i, src) in SOURCES.iter().enumerate() {
+            let lines = src.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')).count();
+            let rows = parse(src);
+            assert_eq!(rows.len(), lines, "{}.toml has a malformed line (expected `key = \"value\"`)", LANGS[i]);
+            assert_eq!(keys(i).len(), rows.len(), "{}.toml has duplicate keys", LANGS[i]);
+        }
+    }
+
+    #[test]
+    fn system_follows_spanish_only() {
+        assert_eq!(I18n::from_system("es-419").lang(), "es");
+        assert_eq!(I18n::from_system("es_ES").lang(), "es");
+        assert_eq!(I18n::from_system("de-DE").lang(), "en");
+        assert_eq!(I18n::from_system("en-US").lang(), "en");
+    }
+
+    /// Every key exists in both English and Spanish, with no duplicates, no empty values and
+    /// the same `{placeholders}` in both.
+    #[test]
+    fn english_and_spanish_are_complete() {
+        let (en, es) = (keys(0), keys(1));
+        let only_en: Vec<_> = en.difference(&es).collect();
+        let only_es: Vec<_> = es.difference(&en).collect();
+        assert!(only_en.is_empty(), "keys missing in es.toml: {only_en:?}");
+        assert!(only_es.is_empty(), "keys missing in en.toml: {only_es:?}");
+        for i in 0..2 {
+            let rows = parse(SOURCES[i]);
+            assert_eq!(rows.len(), keys(i).len(), "duplicate keys in {}.toml", LANGS[i]);
+            assert!(rows.iter().all(|(k, v)| !v.is_empty() || k.ends_with(".none")), "empty value in {}.toml", LANGS[i]);
+        }
+        let (en_map, es_map) = (&tables()[0], &tables()[1]);
+        for (k, v) in en_map {
+            assert_eq!(placeholders(v), placeholders(&es_map[k]), "placeholders differ for {k}");
+        }
+    }
+
+    /// Plural keys come in `.one` / `.other` pairs.
+    #[test]
+    fn plurals_are_paired() {
+        for i in 0..2 {
+            let ks = keys(i);
+            for k in &ks {
+                if let Some(base) = k.strip_suffix(".one") {
+                    assert!(ks.contains(&format!("{base}.other")), "{base}.other missing in {}.toml", LANGS[i]);
+                }
+                if let Some(base) = k.strip_suffix(".other") {
+                    assert!(ks.contains(&format!("{base}.one")), "{base}.one missing in {}.toml", LANGS[i]);
+                }
+            }
+        }
+    }
+
+    /// Partial languages may only define keys that exist in English.
+    #[test]
+    fn partial_languages_have_no_stray_keys() {
+        let en = keys(0);
+        for i in 2..LANGS.len() {
+            let extra: Vec<_> = keys(i).difference(&en).cloned().collect();
+            assert!(extra.is_empty(), "{}.toml has keys English lacks: {extra:?}", LANGS[i]);
+        }
+    }
+
+    #[test]
+    fn plurals_and_decimal_comma() {
+        let es = I18n::new(Some("es"));
+        let en = I18n::new(Some("en"));
+        assert_eq!(es.tn("n.processes", 1, &[]), "1 proceso");
+        assert_eq!(es.tn("n.processes", 3, &[]), "3 procesos");
+        assert_eq!(en.tn("n.processes", 1, &[]), "1 process");
+        assert_eq!(en.tn("n.processes", 0, &[]), "0 processes");
+        assert_eq!(es.num("3.07 GB"), "3,07 GB");
+        assert_eq!(en.num("3.07 GB"), "3.07 GB");
+    }
+
+    #[test]
+    fn parser_handles_escapes_and_comments() {
+        let rows = parse("# c\n\na.b = \"x \\\"q\\\" y\\nz\"\nbad line\nc = \"é…\"\n");
+        assert_eq!(rows, vec![("a.b".to_string(), "x \"q\" y\nz".to_string()), ("c".to_string(), "é…".to_string())]);
     }
 }

@@ -10,6 +10,7 @@ use std::collections::HashSet;
 use anyhow::{Result, bail};
 use serde::{Deserialize, Serialize};
 
+use crate::i18n::I18n;
 use crate::model::Snapshot;
 use crate::paths;
 use crate::sys;
@@ -73,26 +74,61 @@ impl Plan {
         if self.pids.len() > 1 { format!("{} processes", self.pids.len()) } else { "1 process".into() }
     }
 
-    /// Dialog title: "Quit Brave Browser?" / "Force quit node (pid 42)?".
-    pub fn headline(&self) -> String {
-        format!("{}?", self.verb_title())
+    /// The two composed titles ("container x", "Claude session in y") split back into parts.
+    /// `None` for every other target, and for a title that is not in that shape.
+    fn title_parts(&self) -> Option<TitleParts<'_>> {
+        match &self.target {
+            Target::Container(_) => self.title.strip_prefix("container ").map(TitleParts::Container),
+            Target::AgentSession(_) => self.title.split_once(" session in ").map(|(agent, project)| TitleParts::Session { agent, project }),
+            _ => None,
+        }
     }
 
-    /// The details a confirmation shows as separate chips: process count (when there are
-    /// processes), memory freed, and the ports that become free.
-    pub fn details(&self) -> Vec<String> {
+    /// The target's display name in `i18n`'s language. Names of apps, processes and projects
+    /// are kept as they are; the two composed titles are rebuilt from their parts.
+    fn title_in(&self, i18n: &I18n) -> String {
+        match self.title_parts() {
+            Some(TitleParts::Container(name)) => i18n.tf("plan.container", &[("name", name)]),
+            Some(TitleParts::Session { agent, project }) => i18n.tf("plan.agent_session", &[("agent", agent), ("project", project)]),
+            None => self.title.clone(),
+        }
+    }
+
+    /// Dialog title in the UI language: "Quit Brave Browser?" / "Force quit node (pid 42)?".
+    /// Containers and agent sessions have their own sentences so each reads naturally.
+    pub fn headline_in(&self, i18n: &I18n) -> String {
+        let force = self.mode == Mode::ForceQuit;
+        match self.title_parts() {
+            Some(TitleParts::Container(name)) => {
+                i18n.tf(if force { "plan.force_quit_container" } else { "plan.quit_container" }, &[("name", name)])
+            }
+            Some(TitleParts::Session { agent, project }) => {
+                i18n.tf(if force { "plan.force_quit_session" } else { "plan.quit_session" }, &[("agent", agent), ("project", project)])
+            }
+            None => i18n.tf(if force { "plan.force_quit" } else { "plan.quit" }, &[("title", &self.title)]),
+        }
+    }
+
+    /// `details` in the UI language: process count (when there are processes), memory freed,
+    /// and the ports that become free.
+    pub fn details_in(&self, i18n: &I18n) -> Vec<String> {
         let mut v = vec![];
         if !self.pids.is_empty() {
-            v.push(self.process_label());
+            v.push(i18n.tn("n.processes", self.pids.len(), &[]));
         }
-        v.push(format!("Frees {}", format_bytes(self.mem_bytes as f64)));
+        v.push(i18n.tf("plan.frees", &[("mem", &i18n.num(format_bytes(self.mem_bytes as f64)))]));
         match self.ports.len() {
             0 => {}
-            1 => v.push(format!("Port {}", self.ports[0])),
-            _ => v.push(format!("Ports {}", join_ports(&self.ports))),
+            1 => v.push(i18n.tf("plan.port", &[("ports", &self.ports[0].to_string())])),
+            _ => v.push(i18n.tf("plan.ports", &[("ports", &join_ports(&self.ports))])),
         }
         v
     }
+}
+
+enum TitleParts<'a> {
+    Container(&'a str),
+    Session { agent: &'a str, project: &'a str },
 }
 
 fn join_ports(p: &[u16]) -> String {
@@ -129,6 +165,10 @@ pub struct Outcome {
     pub ports_freed: Vec<u16>,
     /// "storefront-web stopped. 458 MB and port 4322 are free."
     pub message: String,
+    /// Why a container could not be stopped (Docker's own error). Only the GUI toast reads it;
+    /// it is not serialised, so MCP and pending-request JSON are unchanged.
+    #[serde(skip)]
+    pub error: Option<String>,
 }
 
 fn descendants_of(s: &Snapshot, roots: &[i32]) -> Vec<i32> {
@@ -225,10 +265,11 @@ pub fn execute(c: Confirmed) -> Outcome {
             failed: vec![],
             mem_freed: if ok { plan.mem_bytes } else { 0 },
             ports_freed: if ok { plan.ports.clone() } else { vec![] },
-            message: match r {
+            message: match &r {
                 Ok(()) => freed_message(&plan.title, plan.mem_bytes, &plan.ports),
                 Err(e) => format!("Could not stop {}: {e}", plan.title),
             },
+            error: r.err().map(|e| e.to_string()),
         };
     }
     let sig = match plan.mode {
@@ -245,7 +286,28 @@ pub fn execute(c: Confirmed) -> Outcome {
     } else {
         format!("{} partially stopped: {} of {} processes did not respond.", plan.title, failed.len(), plan.pids.len())
     };
-    Outcome { ok, stopped, failed, mem_freed: plan.mem_bytes, ports_freed: plan.ports, message }
+    Outcome { ok, stopped, failed, mem_freed: plan.mem_bytes, ports_freed: plan.ports, message, error: None }
+}
+
+/// The toast after an action, in the UI language (the `Outcome::message` is English for CLI/MCP).
+pub fn outcome_message(i18n: &I18n, plan: &Plan, o: &Outcome) -> String {
+    let title = plan.title_in(i18n);
+    if o.ok {
+        let mem = i18n.num(format_bytes(plan.mem_bytes as f64));
+        return match plan.ports.len() {
+            0 => i18n.tf("freed.none", &[("title", &title), ("mem", &mem)]),
+            1 => i18n.tf("freed.port", &[("title", &title), ("mem", &mem), ("ports", &plan.ports[0].to_string())]),
+            _ => i18n.tf("freed.ports", &[("title", &title), ("mem", &mem), ("ports", &join_ports(&plan.ports))]),
+        };
+    }
+    if let Target::Container(_) = plan.target {
+        let name = match plan.title_parts() {
+            Some(TitleParts::Container(name)) => name,
+            _ => &plan.title,
+        };
+        return i18n.tf("freed.container_failed", &[("name", name), ("err", o.error.as_deref().unwrap_or("?"))]);
+    }
+    i18n.tn("freed.partial", plan.pids.len(), &[("title", &title), ("failed", &o.failed.len().to_string())])
 }
 
 pub fn freed_message(title: &str, mem: u64, ports: &[u16]) -> String {
@@ -363,6 +425,81 @@ mod tests {
     }
 
     #[test]
+    fn localised_headline_details_and_outcome() {
+        let es = I18n::new(Some("es"));
+        let mut p = Plan { target: Target::App("x".into()), mode: Mode::Quit, title: "Brave".into(), pids: vec![1, 2, 3], mem_bytes: 3_070_000_000, ports: vec![3000] };
+        assert_eq!(p.headline_in(&es), "¿Salir de Brave?");
+        assert_eq!(p.details_in(&es), vec!["3 procesos", "Libera 3,07 GB", "Puerto 3000"]);
+        p.mode = Mode::ForceQuit;
+        p.pids = vec![1];
+        assert_eq!(p.headline_in(&es), "¿Forzar la salida de Brave?");
+        assert_eq!(p.details_in(&es)[0], "1 proceso");
+        p.target = Target::Container("abc".into());
+        p.title = "container db".into();
+        assert_eq!(p.headline_in(&es), "¿Forzar la detención del contenedor db?");
+        p.mode = Mode::Quit;
+        assert_eq!(p.headline_in(&es), "¿Detener el contenedor db?");
+        p.mode = Mode::ForceQuit;
+        // English stays what the CLI and MCP print.
+        assert_eq!(p.headline_in(&I18n::english()), "Force quit container db?");
+        let o = Outcome { ok: true, stopped: vec![], failed: vec![], mem_freed: 0, ports_freed: vec![], message: String::new(), error: None };
+        assert_eq!(outcome_message(&es, &p, &o), "Contenedor db: parada completada. Quedan libres 3,07 GB y el puerto 3000.");
+        assert_eq!(outcome_message(&I18n::english(), &p, &o), "container db stopped. 3.07 GB and port 3000 are free.");
+        // A failed container stop keeps Docker's reason, in either language.
+        let failed = Outcome { ok: false, error: Some("daemon not running".into()), ..o.clone() };
+        assert_eq!(outcome_message(&es, &p, &failed), "No se pudo detener el contenedor db: daemon not running");
+        assert_eq!(outcome_message(&I18n::english(), &p, &failed), "Could not stop container db: daemon not running");
+        // The reason never reaches the serialised outcome (MCP / pending JSON).
+        assert!(!serde_json::to_string(&failed).unwrap().contains("daemon"));
+        // Agent sessions have their own sentences and a title that agrees with any wording.
+        let mut sp = Plan { target: Target::AgentSession(5), mode: Mode::Quit, title: "Claude session in x".into(), pids: vec![5], mem_bytes: 1_000_000, ports: vec![] };
+        assert_eq!(sp.headline_in(&es), "¿Cerrar la sesión de Claude en x?");
+        sp.mode = Mode::ForceQuit;
+        assert_eq!(sp.headline_in(&es), "¿Forzar el cierre de la sesión de Claude en x?");
+        assert_eq!(sp.headline_in(&I18n::english()), "Force quit Claude session in x?");
+        let ok = Outcome { ok: true, ..o };
+        assert_eq!(outcome_message(&es, &sp, &ok), "Sesión de Claude en x: parada completada. Quedan libres 1 MB.");
+    }
+
+    /// `title_in` and the headline rebuild titles by parsing the English text `plan_as` writes.
+    /// Walk the real `plan_as` output so a reworded title cannot silently fall back to English.
+    #[test]
+    fn composed_titles_come_from_plan_as() {
+        use crate::model::{AgentKind, AgentSession, Container, Process};
+        let me = sys::current_uid();
+        let s = Snapshot {
+            processes: vec![Process { pid: 50, uid: me, name: "node".into(), ..Default::default() }, Process { pid: 51, uid: me, name: "claude".into(), ..Default::default() }],
+            containers: vec![Container { id: "abc123".into(), name: "db".into(), ..Default::default() }],
+            agents: vec![AgentSession {
+                agent_kind: AgentKind::ClaudeCode,
+                pid: 51,
+                project: "storefront".into(),
+                state: crate::model::AgentState::Working,
+                started_at: 0,
+                mem_bytes: 0,
+                cpu_percent: 0.0,
+                spawned_pids: vec![],
+                started: vec![],
+                branch_or_task: None,
+            }],
+            ..Default::default()
+        };
+        let es = I18n::new(Some("es"));
+        let c = plan_as(&s, Target::Container("db".into()), Mode::Quit, me).unwrap();
+        assert_eq!(c.title_parts().map(|p| matches!(p, TitleParts::Container("db"))), Some(true), "container title shape changed: {:?}", c.title);
+        assert_eq!(c.title_in(&es), "Contenedor db");
+        let a = plan_as(&s, Target::AgentSession(51), Mode::Quit, me).unwrap();
+        assert!(matches!(a.title_parts(), Some(TitleParts::Session { agent: "Claude Code", project: "storefront" })), "session title shape changed: {:?}", a.title);
+        assert_eq!(a.title_in(&es), "Sesión de Claude Code en storefront");
+        for p in [&c, &a] {
+            for mode in [Mode::Quit, Mode::ForceQuit] {
+                let p = Plan { mode, ..p.clone() };
+                assert_ne!(p.headline_in(&es), p.headline_in(&I18n::english()), "{:?} has no Spanish headline", p.target);
+            }
+        }
+    }
+
+    #[test]
     fn plan_refuses_foreign_and_system() {
         use crate::model::{AppGroup, Process};
         let me = sys::current_uid();
@@ -383,18 +520,19 @@ mod tests {
 
     #[test]
     fn plan_summary_and_structured_details() {
+        let en = I18n::english();
         let mut p = Plan { target: Target::App("x".into()), mode: Mode::Quit, title: "Brave".into(), pids: vec![1, 2, 3], mem_bytes: 4_900_000, ports: vec![3000, 8000] };
         assert_eq!(p.summary(), "Quit Brave (3 processes)? Frees about 4.9 MB and ports 3000, 8000.");
-        assert_eq!(p.headline(), "Quit Brave?");
-        assert_eq!(p.details(), vec!["3 processes", "Frees 4.9 MB", "Ports 3000, 8000"]);
+        assert_eq!(p.headline_in(&en), "Quit Brave?");
+        assert_eq!(p.details_in(&en), vec!["3 processes", "Frees 4.9 MB", "Ports 3000, 8000"]);
         p.mode = Mode::ForceQuit;
         p.pids = vec![7];
         p.ports = vec![5037];
         assert_eq!(p.summary(), "Force quit Brave (1 process)? Frees about 4.9 MB and port 5037.");
-        assert_eq!(p.headline(), "Force quit Brave?");
-        assert_eq!(p.details(), vec!["1 process", "Frees 4.9 MB", "Port 5037"]);
+        assert_eq!(p.headline_in(&en), "Force quit Brave?");
+        assert_eq!(p.details_in(&en), vec!["1 process", "Frees 4.9 MB", "Port 5037"]);
         p.pids.clear();
         p.ports.clear();
-        assert_eq!(p.details(), vec!["Frees 4.9 MB"]);
+        assert_eq!(p.details_in(&en), vec!["Frees 4.9 MB"]);
     }
 }

@@ -217,6 +217,8 @@ mod tests {
         assert_eq!(I18n::new(Some("zh-Hans-CN")).t("tab.memory"), "内存");
         assert_eq!(I18n::new(Some("xx")).t("peak"), "Peak");
         assert_eq!(I18n::new(Some("en")).t("missing.key"), "missing.key");
+        assert_eq!(I18n::new(Some("es")).t("detail.open"), "Detalles");
+        assert_eq!(I18n::new(Some("de")).t("detail.open"), "Details");
     }
 
     #[test]

@@ -27,6 +27,7 @@ use crate::sorting::{self, FrozenOrder, SortKey, SortSpec};
 use crate::units::{CpuUnit, DataUnit, TempUnit, Units, format_duration};
 use crate::{docker, output, paths, projects, share_card, sys};
 
+mod detail;
 mod sidebar;
 mod tabs;
 
@@ -134,6 +135,7 @@ pub struct PulseApp {
     /// A text field had focus at the end of the last frame: shortcuts stay out of its way.
     text_focus: bool,
     inspector: Option<InspectorState>,
+    detail: Option<detail::AppDetailState>,
     confirm: Option<Plan>,
     pending: Vec<PendingRequest>,
     last_pending_poll: Instant,
@@ -178,6 +180,7 @@ impl PulseApp {
             list_rows: vec![],
             text_focus: false,
             inspector: None,
+            detail: None,
             confirm: None,
             pending: vec![],
             last_pending_poll: Instant::now() - Duration::from_secs(10),
@@ -275,6 +278,8 @@ impl PulseApp {
     }
 
     fn open_inspector(&mut self, snap: &Arc<Snapshot>, pid: i32) {
+        // Both are right-hand panels: only one at a time.
+        self.detail = None;
         let (tx, rx) = channel();
         let s = snap.clone();
         std::thread::spawn(move || {
@@ -1446,6 +1451,7 @@ impl eframe::App for PulseApp {
             });
         }
         self.inspector_panel(ctx, &snap);
+        self.detail_panel(ctx, &snap);
         egui::CentralPanel::default().show(ctx, |ui| {
             self.alerts_bar(ui, &snap);
             egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| match self.tab {

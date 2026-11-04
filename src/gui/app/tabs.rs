@@ -118,7 +118,7 @@ fn watts(i18n: &I18n, v: Option<f64>) -> String {
 }
 
 impl PulseApp {
-    fn color(&self, ui: &egui::Ui, k: MetricKind) -> Color32 {
+    pub(super) fn color(&self, ui: &egui::Ui, k: MetricKind) -> Color32 {
         widgets::metric_color(self.settings.theme, ui.visuals().dark_mode, k)
     }
 
@@ -280,7 +280,7 @@ impl PulseApp {
         }
     }
 
-    fn app_icon(&mut self, ui: &mut egui::Ui, bundle: Option<&str>, name: &str, size: f32) {
+    pub(super) fn app_icon(&mut self, ui: &mut egui::Ui, bundle: Option<&str>, name: &str, size: f32) {
         if let Some(t) = self.icons.get(ui.ctx(), bundle) {
             ui.image((t, Vec2::splat(size)));
         } else {
@@ -320,6 +320,7 @@ impl PulseApp {
         });
         let mut action: Option<(Target, Mode)> = None;
         let mut inspect: Option<i32> = None;
+        let mut details: Option<String> = None;
         let mut export: Option<bool> = None;
         let (m_key, ls) = (SortKey::from_metric(m), self.settings.list_sort.get(&self.tab).cloned().unwrap_or_default());
         let app_sort = ls.apps.unwrap_or(SortSpec::for_metric(m));
@@ -419,6 +420,8 @@ impl PulseApp {
                 }
             }
             let max = top.iter().map(|a| a.metric(m)).fold(0.0, f64::max).max(1e-9);
+            // Apps whose history is being recorded (the detail panel has charts for them).
+            let with_history: std::collections::HashSet<&str> = crate::daemon::tracked_apps(snap).into_iter().map(|a| a.key.as_str()).collect();
             let hover_fill = if ui.visuals().dark_mode { Color32::from_rgb(38, 38, 42) } else { Color32::from_rgb(244, 244, 247) };
             for a in top {
                 shown_apps.push(a.key.clone());
@@ -462,6 +465,7 @@ impl PulseApp {
                     ui.painter().rect_filled(Rect::from_min_size(mrect.min, Vec2::new((meter_w * frac).max(3.0), 5.0)), 2.5, color);
                 }
                 let left = Rect::from_min_max(inner.min, egui::pos2(inner.right() - meter_w - 16.0 - extras.len() as f32 * EXTRA_COL_W, inner.bottom()));
+                let mut name_rect = Rect::NOTHING;
                 ui.new_child(egui::UiBuilder::new().max_rect(left).layout(egui::Layout::left_to_right(Align::Center))).scope(|ui| {
                     ui.style_mut().interaction.selectable_labels = false;
                     self.app_icon(ui, a.app.bundle_path.as_deref(), &a.app.name, 32.0);
@@ -469,7 +473,7 @@ impl PulseApp {
                     ui.vertical(|ui| {
                         ui.spacing_mut().item_spacing.y = 1.0;
                         let name = RichText::new(&a.app.name).size(15.0).strong();
-                        ui.add(egui::Label::new(if highlighted { name.color(color) } else { name.color(strong) }).truncate());
+                        name_rect = ui.add(egui::Label::new(if highlighted { name.color(color) } else { name.color(strong) }).truncate()).rect;
                         let procs = match (process_hits, &matches) {
                             (true, Some(mt)) => {
                                 let hits = a.pids.iter().filter(|p| mt.pids.contains(p)).count();
@@ -477,12 +481,16 @@ impl PulseApp {
                             }
                             _ => self.i18n.tn("n.processes", a.process_count, &[]),
                         };
+                        let procs = if with_history.contains(a.key.as_str()) && a.key != crate::grouping::SYSTEM_KEY { format!("{procs} · {}", self.i18n.t("detail.history")) } else { procs };
                         ui.label(RichText::new(procs).size(12.5).weak());
                     });
                     // Groups opened by a search show only some processes: no standing whole-app
                     // buttons there, just on hover.
                     if (over_row || highlighted || (open && !process_hits)) && a.key != crate::grouping::SYSTEM_KEY {
                         ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
+                            if widgets::icon_button(ui, ActionIcon::Details, strong, &self.i18n.t("detail.open")).clicked() {
+                                details = Some(a.key.clone());
+                            }
                             if widgets::icon_button(ui, ActionIcon::ForceQuit, danger, &(self.i18n.t("force_quit") + "…")).clicked() {
                                 action = Some((Target::App(a.key.clone()), Mode::ForceQuit));
                             }
@@ -492,10 +500,16 @@ impl PulseApp {
                         });
                     }
                 });
+                let click_pos = ui.input(|i| i.pointer.interact_pos());
                 if resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() && !process_hits {
-                    self.expanded.insert(a.key.clone(), !open);
-                    self.highlight = Some(a.key.clone());
-                    self.sel_proc = None;
+                    // A click on the app's name opens its detail panel; elsewhere it expands the processes.
+                    if a.key != crate::grouping::SYSTEM_KEY && click_pos.is_some_and(|p| name_rect.contains(p)) {
+                        details = Some(a.key.clone());
+                    } else {
+                        self.expanded.insert(a.key.clone(), !open);
+                        self.highlight = Some(a.key.clone());
+                        self.sel_proc = None;
+                    }
                 }
                 if highlighted && self.scroll_to_highlight {
                     ui.scroll_to_rect(rect, Some(Align::Center));
@@ -644,6 +658,9 @@ impl PulseApp {
         }
         if let Some(pid) = inspect {
             self.open_inspector(snap, pid);
+        }
+        if let Some(key) = details {
+            self.open_detail(snap, &key);
         }
     }
 

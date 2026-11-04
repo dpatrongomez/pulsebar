@@ -1,5 +1,6 @@
 //! Search over the snapshot (⌘F in the window): which apps and which of their processes match a
-//! free-text query. Pure and allocation-light so the GUI can run it once per frame.
+//! free-text query. Pure, and cheap enough to run per frame (one pass over the processes; lowercasing
+//! still allocates a string per haystack).
 //!
 //! A query matches, case-insensitively:
 //! * an **app** by name or bundle id;
@@ -86,7 +87,7 @@ impl Matcher {
         }
         self.contains(&p.name)
             || self.contains(&p.executable_path)
-            || p.argv.iter().any(|a| self.contains(a))
+            || (!p.argv.is_empty() && self.contains(&p.argv.join(" ")))
     }
 }
 
@@ -101,18 +102,21 @@ pub struct Matches {
 
 pub fn filter(snap: &Snapshot, m: &Matcher) -> Matches {
     let mut out = Matches::default();
+    // pid -> process once, instead of a linear `snap.process` lookup per pid.
+    let by_pid: HashMap<i32, &Process> = snap.processes.iter().map(|p| (p.pid, p)).collect();
+    let hit = |pid: &i32| by_pid.get(pid).is_some_and(|p| m.matches_process(p));
     for a in &snap.apps {
         if m.matches_app(a) {
             // The app matched by itself; still record process-level hits to highlight them.
             for pid in &a.pids {
-                if snap.process(*pid).is_some_and(|p| m.matches_process(p)) {
+                if hit(pid) {
                     out.pids.insert(*pid);
                 }
             }
             out.apps.insert(a.key.clone(), AppHit::App);
             continue;
         }
-        let hits: Vec<i32> = a.pids.iter().copied().filter(|pid| snap.process(*pid).is_some_and(|p| m.matches_process(p))).collect();
+        let hits: Vec<i32> = a.pids.iter().copied().filter(|pid| hit(pid)).collect();
         if !hits.is_empty() {
             out.pids.extend(hits.iter().copied());
             out.apps.insert(a.key.clone(), AppHit::Processes(hits));
@@ -185,6 +189,10 @@ mod tests {
         assert_eq!(m.apps.get("bundle:com.tinyspeck.slackmacgap"), Some(&AppHit::Processes(vec![101])));
         assert_eq!(m.apps.len(), 1);
         assert_eq!(run("server.js").apps.get("name:node"), Some(&AppHit::Processes(vec![412])));
+        // Multi-word queries match across arguments.
+        for q in ["node server.js", "server.js --port", "npm run dev"] {
+            assert_eq!(run(q).apps.contains_key("name:node"), q != "npm run dev", "{q}");
+        }
     }
 
     #[test]

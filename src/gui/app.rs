@@ -152,6 +152,9 @@ struct FrozenOrder {
     procs: HashMap<String, Vec<i32>>,
     /// Search query the order was captured under; a different query invalidates it.
     query: String,
+    /// Search matches captured with the order; reused while the query is unchanged so the set of
+    /// rows can only shrink (ended processes) under the pointer, never swap meaning.
+    matches: Option<crate::search::Matches>,
 }
 
 fn local_midnight() -> i64 {
@@ -251,6 +254,11 @@ impl PulseApp {
         self.inspector = Some(InspectorState { detail: inspector::inspect(snap, pid, false), rx: Some(rx) });
     }
 
+    /// A confirmation or MCP approval dialog is showing.
+    fn dialog_open(&self) -> bool {
+        self.confirm.is_some() || !self.pending.is_empty()
+    }
+
     /// Navigation requests from the menu bar agent (nav.json).
     fn handle_nav(&mut self) {
         if self.last_nav_poll.elapsed() < Duration::from_millis(300) {
@@ -262,6 +270,10 @@ impl PulseApp {
             self.nav_seen = nav.at_ms;
             self.tab = nav.tab;
             self.scroll_to_highlight = nav.app.is_some();
+            // A search on the target tab could hide the app being opened.
+            if nav.app.is_some() {
+                self.search.remove(&nav.tab);
+            }
             self.highlight = nav.app;
             show_app();
         }
@@ -1212,7 +1224,8 @@ impl eframe::App for PulseApp {
         self.shared.foreground.store(focused, Ordering::Relaxed);
         self.handle_nav();
         // ⌘F focuses the search field of the current tab's app list.
-        if ctx.input_mut(|i| i.consume_shortcut(&egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::F))) {
+        // Ignored while a dialog is open, like Esc in the search field.
+        if ctx.input_mut(|i| i.consume_shortcut(&egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::F))) && !self.dialog_open() {
             self.focus_search = true;
         }
         if self.last_pending_poll.elapsed() > Duration::from_secs(1) {

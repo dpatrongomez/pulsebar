@@ -281,15 +281,16 @@ impl PulseApp {
         let card_fill = widgets::card_fill(ui.visuals().dark_mode);
         // Search (⌘F): one pass over the snapshot per frame; the query lives per tab.
         let query = self.search_field(ui);
-        let matcher = crate::search::Matcher::new(&query, snap);
-        let matches = matcher.as_ref().map(|mt| crate::search::filter(snap, mt));
+        // While the pointer is over the list the matches stay frozen with the order (same query).
+        let frozen_matches = self.frozen.as_mut().filter(|f| f.metric == m && f.query == query).and_then(|f| f.matches.take());
+        let matches = frozen_matches.or_else(|| crate::search::Matcher::new(&query, snap).map(|mt| crate::search::filter(snap, &mt)));
         let card = egui::Frame::new().fill(card_fill).corner_radius(16.0).inner_margin(egui::Margin::symmetric(10, 14)).show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
                 ui.add_space(10.0);
                 ui.label(RichText::new("App").size(14.0).weak());
                 let summary = match &matches {
-                    Some(mt) => format!("· {} {}", mt.apps.len(), self.i18n.t("search.matches")),
+                    Some(mt) => format!("· {}: {}", self.i18n.t("search.apps"), mt.apps.len()),
                     None => format!("· {} processes in {} apps", snap.processes.len(), snap.apps.len()),
                 };
                 ui.label(RichText::new(summary).size(12.0).weak());
@@ -362,10 +363,16 @@ impl PulseApp {
                         ui.spacing_mut().item_spacing.y = 1.0;
                         let name = RichText::new(&a.app.name).size(15.0).strong();
                         ui.add(egui::Label::new(if highlighted { name.color(color) } else { name.color(strong) }).truncate());
-                        let procs = if a.process_count == 1 { "1 process".to_string() } else { format!("{} processes", a.process_count) };
+                        let procs = match (process_hits, &matches) {
+                            (true, Some(mt)) => format!("{} of {} processes", a.pids.iter().filter(|p| mt.pids.contains(p)).count(), a.process_count),
+                            _ if a.process_count == 1 => "1 process".to_string(),
+                            _ => format!("{} processes", a.process_count),
+                        };
                         ui.label(RichText::new(procs).size(12.5).weak());
                     });
-                    if (over_row || open || highlighted) && a.key != crate::grouping::SYSTEM_KEY {
+                    // Groups opened by a search show only some processes: no standing whole-app
+                    // buttons there, just on hover.
+                    if (over_row || highlighted || (open && !process_hits)) && a.key != crate::grouping::SYSTEM_KEY {
                         ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
                             if widgets::icon_button(ui, ActionIcon::ForceQuit, danger, &(self.i18n.t("force_quit") + "…")).clicked() {
                                 action = Some((Target::App(a.key.clone()), Mode::ForceQuit));
@@ -376,7 +383,7 @@ impl PulseApp {
                         });
                     }
                 });
-                if resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                if resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() && !process_hits {
                     self.expanded.insert(a.key.clone(), !open);
                 }
                 if highlighted && self.scroll_to_highlight {
@@ -389,7 +396,7 @@ impl PulseApp {
                     if let (true, Some(mt)) = (process_hits, &matches) {
                         procs.retain(|p| mt.pids.contains(&p.pid));
                     }
-                    let frozen_pids = self.frozen.as_ref().filter(|f| f.metric == m).and_then(|f| f.procs.get(&a.key));
+                    let frozen_pids = self.frozen.as_ref().filter(|f| f.metric == m && f.query == query).and_then(|f| f.procs.get(&a.key));
                     if let Some(order) = frozen_pids {
                         let pos = |pid: i32| order.iter().position(|x| *x == pid).unwrap_or(usize::MAX);
                         procs.sort_by_key(|p| pos(p.pid));
@@ -452,13 +459,19 @@ impl PulseApp {
                             });
                         }
                     }
+                    if procs.len() > 200 {
+                        ui.horizontal(|ui| {
+                            ui.add_space(14.0 + SUB_INDENT);
+                            ui.label(RichText::new(format!("+{} {}", procs.len() - 200, self.i18n.t("search.more"))).size(12.5).weak());
+                        });
+                    }
                     ui.add_space(6.0);
                 }
             }
         });
         // A confirmation dialog on top of the list doesn't count as hovering it.
         let over_list = ui.rect_contains_pointer(card.response.rect) && self.confirm.is_none() && action.is_none();
-        self.frozen = over_list.then_some(FrozenOrder { metric: m, apps: shown_apps, procs: shown_procs, query: query.clone() });
+        self.frozen = over_list.then_some(FrozenOrder { metric: m, apps: shown_apps, procs: shown_procs, query: query.clone(), matches });
         ui.add_space(14.0);
         if let Some(dark) = export {
             let card = crate::cli::card_for(snap, m, &self.settings, dark);
@@ -476,7 +489,7 @@ impl PulseApp {
     }
 
     /// The search field above an app list. Returns the current query (stored per tab). ⌘F focuses
-    /// it; Esc while it has focus clears it.
+    /// it; Esc clears it (unless a dialog is open).
     fn search_field(&mut self, ui: &mut egui::Ui) -> String {
         let tab = self.tab;
         let mut query = self.search.get(&tab).cloned().unwrap_or_default();
@@ -500,8 +513,13 @@ impl PulseApp {
                 resp.request_focus();
                 resp.scroll_to_me(None);
             }
-            let esc = ui.input(|i| i.key_pressed(egui::Key::Escape));
-            if esc && (resp.has_focus() || resp.lost_focus()) {
+            // Esc is a global "clear search" unless a dialog is open (it denies/cancels there); the
+            // field must not keep receiving keys behind a dialog.
+            if self.dialog_open() {
+                if resp.has_focus() {
+                    resp.surrender_focus();
+                }
+            } else if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
                 query.clear();
                 resp.surrender_focus();
             }

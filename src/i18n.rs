@@ -37,7 +37,8 @@ const TABLE: &[Row] = &[
     ("reset_layout",   ["Reset layout","Restablecer diseño","Layout zurücksetzen","Réinitialiser la disposition","Ripristina layout","Indeling herstellen","Redefinir layout","Återställ layout","Скинути розкладку","レイアウトをリセット","레이아웃 재설정","重置布局"]),
     ("search.placeholder", ["Search apps, processes, PID, port…","Buscar apps, procesos, PID, puerto…","Apps, Prozesse, PID, Port suchen…","Rechercher apps, processus, PID, port…","Cerca app, processi, PID, porta…","Zoek apps, processen, PID, poort…","Buscar apps, processos, PID, porta…","Sök appar, processer, PID, port…","Пошук програм, процесів, PID, порту…","アプリ・プロセス・PID・ポートを検索…","앱, 프로세스, PID, 포트 검색…","搜索应用、进程、PID、端口…"]),
     ("search.no_matches", ["No matches","Sin resultados","Keine Treffer","Aucun résultat","Nessun risultato","Geen resultaten","Nenhum resultado","Inga träffar","Нічого не знайдено","一致なし","일치 항목 없음","无匹配项"]),
-    ("search.matches", ["matches","coincidencias","Treffer","résultats","risultati","resultaten","resultados","träffar","збігів","件一致","개 일치","个匹配"]),
+    ("search.apps", ["Apps","Apps","Apps","Apps","App","Apps","Apps","Appar","Застосунки","アプリ","앱","应用"]),
+    ("search.more", ["more","más","weitere","de plus","altri","meer","mais","till","ще","件","개 더","更多"]),
 ];
 
 fn index_of(lang: &str) -> usize {

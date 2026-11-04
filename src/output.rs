@@ -128,7 +128,7 @@ pub fn metric_value(a: &AppGroup, m: RankMetric, u: &Units, cores: usize) -> Str
     match m {
         RankMetric::Cpu => u.cpu(a.cpu_pct, cores),
         RankMetric::Memory => u.bytes(a.mem_bytes),
-        RankMetric::Energy => format!("{:.2} W", a.energy_w),
+        RankMetric::Energy => u.watts(a.energy_w, 2),
         RankMetric::Disk => u.rate(a.disk_read_bps + a.disk_write_bps),
         RankMetric::Network => u.rate(a.net_rx_bps + a.net_tx_bps),
     }

@@ -435,7 +435,7 @@ impl PulseApp {
         self.frozen = over_list.then_some(FrozenOrder { metric: m, apps: shown_apps, procs: shown_procs });
         ui.add_space(14.0);
         if let Some(dark) = export {
-            let card = crate::cli::card_for(snap, m, &self.settings, dark);
+            let card = crate::cli::card_for_in(&self.i18n, &u, snap, m, dark);
             match share_card::export(&card, &paths::exports_dir(), &format!("pulsebar-{}", m.as_str())) {
                 Ok(p) => {
                     let m = self.tf("saved", &[("path", &p.display().to_string())]);
@@ -931,7 +931,7 @@ impl PulseApp {
             Tile::text("☰", self.t("tab.memory"), u.bytes(snap.agents.iter().map(|a| a.mem_bytes).sum()), self.t("agents.and_started")),
             Tile::text("▣", "CPU", u.cpu(snap.agents.iter().map(|a| a.cpu_percent).sum(), snap.machine.cpu.core_count), self.t("agents.all_sessions")),
             match tightest {
-                Some(p) => Tile::text("👾", self.t("agents.closest_limit"), self.tf("pct_left", &[("v", &format!("{:.0}", 100.0 - p.used_pct))]), format!("{} · {}", p.provider, p.window))
+                Some(p) => Tile::text("👾", self.t("agents.closest_limit"), self.tf("pct_left", &[("v", &format!("{:.0}", 100.0 - p.used_pct))]), format!("{} · {}", p.provider, loc::window_label(&self.i18n, &p.window)))
                     .colored((p.pace_state == PaceState::RunsOut).then_some(pal.danger)),
                 None => Tile::text("👾", self.t("agents.closest_limit"), "—", self.t("no_plan_usage")),
             },
@@ -981,7 +981,7 @@ impl PulseApp {
                         quit = Some(a.pid);
                     }
                     if !a.started.is_empty() {
-                        let label = if open { self.t("agents.hide_started") } else { self.tf("agents.n_started", &[("n", &a.started.len().to_string())]) };
+                        let label = if open { self.t("agents.hide_started") } else { self.i18n.tn("agents.n_started", a.started.len(), &[]) };
                         if ui.button(label).clicked() {
                             toggle = Some(key.clone());
                         }

@@ -1066,7 +1066,7 @@ impl PulseApp {
             };
             ui.horizontal(|ui| {
                 if ui.button(i18n.t("copy")).clicked() {
-                    ctx.copy_text(inspector::to_text(&d, &u, cores));
+                    ctx.copy_text(inspector::to_text_in(&i18n, &d, &u, cores));
                     toast = Some(i18n.t("insp.copied"));
                 }
                 if ui.button(i18n.t("insp.export_csv")).clicked() {
@@ -1089,7 +1089,7 @@ impl PulseApp {
                 ui.label(RichText::new(i18n.t("insp.checking")).weak());
             }
             egui::ScrollArea::vertical().show(ui, |ui| {
-                ui.monospace(inspector::to_text(&d, &u, cores));
+                ui.monospace(inspector::to_text_in(&i18n, &d, &u, cores));
             });
         });
         if close {

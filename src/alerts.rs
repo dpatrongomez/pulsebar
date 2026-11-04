@@ -330,7 +330,7 @@ mod tests {
         }
         let a = &fired[0];
         assert_eq!(a.text(&I18n::english()), a.message);
-        assert!(a.text(&I18n::new(Some("es"))).starts_with("La CPU ha promediado 85 %"), "{}", a.text(&I18n::new(Some("es"))));
+        assert!(a.text(&I18n::new(Some("es"))).starts_with("CPU al 85 % de media"), "{}", a.text(&I18n::new(Some("es"))));
         let old = Alert { key: String::new(), args: vec![], ..a.clone() };
         assert_eq!(old.text(&I18n::new(Some("es"))), old.message);
     }

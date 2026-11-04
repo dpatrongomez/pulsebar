@@ -48,8 +48,8 @@ pub fn pace_text(i18n: &I18n, text: &str) -> String {
     match text {
         "on pace" => i18n.t("pace.on_pace"),
         "well under limit" => i18n.t("pace.under"),
-        "set a token budget in Settings" => i18n.t("pace.set_budget"),
-        "enter usage in Settings" => i18n.t("pace.enter_usage"),
+        crate::limits::PACE_NO_BUDGET => i18n.t("pace.set_budget"),
+        crate::limits::PACE_NO_USAGE => i18n.t("pace.enter_usage"),
         other => other.to_string(),
     }
 }
@@ -126,6 +126,55 @@ mod tests {
         assert_eq!(idle_banner(&en, &u, &[]), None);
     }
 
+    /// `pace_text` and `error_text` match the English wording of the core. Feed them what the
+    /// core really produces, so rewording a message there fails here instead of silently
+    /// showing English in Spanish.
+    #[test]
+    fn every_core_pace_text_has_a_translation() {
+        let es = I18n::new(Some("es"));
+        let week = 7 * 86_400;
+        let mut texts: std::collections::BTreeSet<String> = [crate::limits::PACE_NO_BUDGET, crate::limits::PACE_NO_USAGE].map(String::from).into();
+        for used in [0.0, 5.0, 28.0, 45.0, 80.0, 100.0] {
+            for resets in [None, Some(3600), Some(week / 2), Some(week - 86_400)] {
+                texts.insert(crate::limits::pace(used, week, resets).1);
+            }
+        }
+        // All five sentences of `limits::pace` are exercised.
+        for needle in ["% left", "limit reached", "runs out in", "on pace", "well under limit"] {
+            assert!(texts.iter().any(|t| t.contains(needle)), "sample no longer produces {needle:?}: {texts:?}");
+        }
+        for t in &texts {
+            let out = pace_text(&es, t);
+            assert_ne!(&out, t, "no Spanish translation for pace text {t:?}");
+        }
+    }
+
+    #[test]
+    fn every_plan_as_error_has_a_translation() {
+        use crate::actions::{Mode, Target, plan_as};
+        use crate::model::{AppGroup, Process, Snapshot};
+        let me = crate::sys::current_uid();
+        let s = Snapshot {
+            processes: vec![Process { pid: 60, uid: me.wrapping_add(1), name: "other".into(), ..Default::default() }],
+            apps: vec![AppGroup { key: crate::grouping::SYSTEM_KEY.into(), pids: vec![60], ..Default::default() }],
+            ..Default::default()
+        };
+        let es = I18n::new(Some("es"));
+        let cases = [
+            Target::Pid(99_999),
+            Target::App("nope".into()),
+            Target::App(crate::grouping::SYSTEM_KEY.into()),
+            Target::AgentSession(99_999),
+            Target::Container("nope".into()),
+            Target::Pid(60),
+        ];
+        for t in cases {
+            let e = plan_as(&s, t.clone(), Mode::Quit, me).unwrap_err();
+            let msg = e.to_string();
+            assert_ne!(error_text(&es, &e), msg, "no Spanish translation for {t:?}: {msg:?}");
+        }
+    }
+
     #[test]
     fn spanish_banner_and_plans() {
         let es = I18n::new(Some("es"));
@@ -149,7 +198,7 @@ mod tests {
             pace_text: "on pace".into(),
             source: "x".into(),
         };
-        assert_eq!(plan_headline(&es, &plan, 1000), "Claude · Max 20x · Esta semana 72% restante · Se renueva en 4 d 2 h");
+        assert_eq!(plan_headline(&es, &plan, 1000), "Claude · Max 20x · Esta semana 72 % restante · Se renueva en 4 d 2 h");
         assert_eq!(plan_headline(&I18n::english(), &plan, 1000), crate::limits::headline(&plan, 1000));
     }
 }

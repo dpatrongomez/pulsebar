@@ -69,6 +69,11 @@ impl Units {
         }
     }
 
+    /// Power in watts with a fixed number of decimals ("1.23 W", "1,23 W" when the GUI asks).
+    pub fn watts(&self, w: f64, decimals: usize) -> String {
+        self.loc(format!("{w:.decimals$} W"))
+    }
+
     /// `pct_of_mac` is always 0–100 internally.
     pub fn cpu(&self, pct_of_mac: f64, cores: usize) -> String {
         match self.cpu {
@@ -165,6 +170,9 @@ mod tests {
         assert_eq!(es.bytes(3_070_000_000), "3,07 GB");
         assert_eq!(es.rate(2_400_000.0), "2,4 MB/s");
         assert_eq!(Units::default().bytes(3_070_000_000), "3.07 GB");
+        assert_eq!(es.watts(1.234, 2), "1,23 W");
+        assert_eq!(Units::default().watts(1.234, 2), "1.23 W");
+        assert_eq!(Units::default().watts(1.26, 1), "1.3 W");
         // Never serialised: settings.json is unchanged.
         assert!(!serde_json::to_string(&es).unwrap().contains("decimal"));
     }

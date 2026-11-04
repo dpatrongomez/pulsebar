@@ -116,7 +116,7 @@ pub fn title_and_value(m: MenuMetric, s: &Snapshot, u: &Units) -> (String, f64, 
             (short(u.rate(x.disk.read_bps + x.disk.write_bps)), used, used / 100.0)
         }
         MenuMetric::Gpu => (format!("{:.0}%", x.gpu.utilization_pct), x.gpu.utilization_pct, x.gpu.utilization_pct / 100.0),
-        MenuMetric::Neural => (format!("{:.1}W", x.neural.power_w), x.neural.utilization_pct, x.neural.utilization_pct / 100.0),
+        MenuMetric::Neural => (u.watts(x.neural.power_w, 1).replace(' ', ""), x.neural.utilization_pct, x.neural.utilization_pct / 100.0),
         MenuMetric::Temperature => {
             let t = x.sensors.cpu_temp_c.unwrap_or(0.0);
             (short(u.temp(t)), t, t / 110.0)
@@ -139,8 +139,8 @@ pub fn lines(m: MenuMetric, s: &Snapshot, u: &Units, i18n: &I18n) -> Vec<String>
     let x = &s.machine;
     let cores = x.cpu.core_count;
     let tf = |k: &str, a: &[(&str, &str)]| i18n.tf(k, a);
-    let w1 = |w: f64| i18n.num(format!("{w:.1} W"));
-    let w2 = |w: f64| i18n.num(format!("{w:.2} W"));
+    let w1 = |w: f64| u.watts(w, 1);
+    let w2 = |w: f64| u.watts(w, 2);
     let dash = || "—".to_string();
     let mut v = match m {
         MenuMetric::Cpu => vec![
@@ -203,7 +203,7 @@ pub fn lines(m: MenuMetric, s: &Snapshot, u: &Units, i18n: &I18n) -> Vec<String>
                 "tray.health_cycles",
                 &[
                     ("health", &x.battery.health_pct.map(|h| format!("{h:.0} %")).unwrap_or_else(dash)),
-                    ("cycles", &x.battery.cycle_count.map(|c| c.to_string()).unwrap_or_else(dash)),
+                    ("cycles", &x.battery.cycle_count.map(|c| i18n.tn("n.cycles", c.max(0) as usize, &[])).unwrap_or_else(dash)),
                 ],
             ),
         ],

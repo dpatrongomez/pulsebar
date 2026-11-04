@@ -32,8 +32,8 @@ plist = "1.10.3"
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = { version = "0.6", optional = true }
 objc2-app-kit = { version = "0.3", optional = true, default-features = false, features = ["std", "NSApplication", "NSResponder", "NSRunningApplication"] }
-objc2-foundation = { version = "0.3", optional = true }
-objc2-user-notifications = { version = "0.3", optional = true }
+objc2-foundation = { version = "0.3", optional = true, default-features = false, features = ["std", "block2", "NSArray", "NSBundle", "NSDictionary", "NSError", "NSObject", "NSSet", "NSString"] }
+objc2-user-notifications = { version = "0.3", optional = true, default-features = false, features = ["std", "block2", "bitflags", "UNNotification", "UNNotificationAction", "UNNotificationCategory", "UNNotificationContent", "UNNotificationRequest", "UNNotificationResponse", "UNNotificationSettings", "UNNotificationSound", "UNNotificationTrigger", "UNUserNotificationCenter"] }
 block2 = { version = "0.6", optional = true }
 dispatch2 = { version = "0.3", optional = true }
 

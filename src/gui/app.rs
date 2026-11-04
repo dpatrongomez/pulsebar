@@ -238,6 +238,8 @@ impl PulseApp {
     }
 
     fn open_inspector(&mut self, snap: &Arc<Snapshot>, pid: i32) {
+        // Both are right-hand panels: only one at a time.
+        self.detail = None;
         let (tx, rx) = channel();
         let s = snap.clone();
         std::thread::spawn(move || {

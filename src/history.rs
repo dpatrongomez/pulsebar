@@ -20,8 +20,9 @@ use rusqlite::{Connection, params};
 
 use crate::model::{AlertKind, AlertRule, AppGroup, HistoryBucket, Snapshot};
 
-/// Schema version stored in `PRAGMA user_version`. 1 = history + alert_rules, 2 = + events.
-const SCHEMA_VERSION: i64 = 2;
+/// Schema version stored in `PRAGMA user_version`. Databases from before versioning have 0
+/// (history + alert_rules); 2 = + events; 3 = + events.old_pid / events.new_pid.
+const SCHEMA_VERSION: i64 = 3;
 
 pub const LEVELS: [(i64, i64); 6] = [
     (1, 300),
@@ -74,14 +75,23 @@ pub fn app_id(g: &AppGroup) -> String {
 }
 
 /// Something notable that happened to an app: an alert that fired or a restart.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct AppEvent {
     pub ts: i64,
     pub app: String,
     /// "alert" | "restart"
     pub kind: String,
+    /// Alert text. Empty for restarts that carry their pids (the UI formats those itself).
     pub message: String,
+    /// Restarts only: the main pid before and after. `None` on rows from older versions.
+    pub old_pid: Option<i32>,
+    pub new_pid: Option<i32>,
 }
+
+/// An app that has to be absent this long (seconds) before the detector forgets its main pid.
+const RESTART_GRACE_S: i64 = 120;
+/// At most one restart event per app in this many seconds (guards against crash loops).
+const RESTART_COOLDOWN_S: i64 = 600;
 
 /// Highest value of an app metric in a period and when (start of the bucket) it happened.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -90,35 +100,44 @@ pub struct Peak {
     pub value: f64,
 }
 
-/// Spots restarts: an app whose main process disappeared and was replaced by another one
-/// between two ticks. Remembers each app's main pid and pid set from the previous tick.
+/// Spots restarts: an app whose main process disappeared and was replaced by another one.
+/// Remembers each app's main pid and pid set for `RESTART_GRACE_S` after it was last seen, so
+/// a quit-and-relaunch that spans several (slow, background) samples is still detected.
 #[derive(Default)]
 pub struct RestartDetector {
-    last: HashMap<String, (i32, Vec<i32>)>,
+    /// app id → (main pid, pids, last seen)
+    last: HashMap<String, (i32, Vec<i32>, i64)>,
+    /// app id → time of the last reported restart
+    reported: HashMap<String, i64>,
 }
 
 impl RestartDetector {
     /// `(app id, previous main pid, new main pid)` for every app that restarted since last call.
-    pub fn feed(&mut self, s: &Snapshot) -> Vec<(String, i32, i32)> {
+    /// `now` is the snapshot time in seconds.
+    pub fn feed(&mut self, s: &Snapshot, now: i64) -> Vec<(String, i32, i32)> {
         let mut out = Vec::new();
-        let mut next = HashMap::new();
         for g in &s.apps {
-            if g.key == crate::grouping::SYSTEM_KEY || g.root_pid <= 0 {
+            // Without a real main process `root_pid` is just the first process seen, which a
+            // short-lived helper can replace without the app having restarted.
+            if g.key == crate::grouping::SYSTEM_KEY || g.root_pid <= 0 || !g.root_is_main {
                 continue;
             }
             let id = app_id(g);
-            if let Some((old_root, old_pids)) = self.last.get(&id)
+            if let Some((old_root, old_pids, _)) = self.last.get(&id)
                 && *old_root != g.root_pid
                 && !g.pids.contains(old_root)
                 // Only if none of the old processes survived as the new main one (helpers that
                 // got promoted when the main process exits aren't a restart of the app).
                 && !old_pids.contains(&g.root_pid)
+                && self.reported.get(&id).is_none_or(|t| now - t >= RESTART_COOLDOWN_S)
             {
+                self.reported.insert(id.clone(), now);
                 out.push((id.clone(), *old_root, g.root_pid));
             }
-            next.insert(id, (g.root_pid, g.pids.clone()));
+            self.last.insert(id, (g.root_pid, g.pids.clone(), now));
         }
-        self.last = next;
+        self.last.retain(|_, v| now - v.2 < RESTART_GRACE_S);
+        self.reported.retain(|_, t| now - *t < RESTART_COOLDOWN_S);
         out
     }
 }
@@ -157,10 +176,18 @@ impl History {
                 kind TEXT PRIMARY KEY, threshold REAL NOT NULL, duration_s INTEGER NOT NULL,
                 enabled INTEGER NOT NULL);
              CREATE TABLE IF NOT EXISTS events (
-                ts INTEGER NOT NULL, app TEXT NOT NULL, kind TEXT NOT NULL, message TEXT NOT NULL);
+                ts INTEGER NOT NULL, app TEXT NOT NULL, kind TEXT NOT NULL, message TEXT NOT NULL,
+                old_pid INTEGER, new_pid INTEGER);
              CREATE INDEX IF NOT EXISTS events_app_ts ON events (app, ts);",
         )?;
-        // Migration from v1 (no events table) is covered by the IF NOT EXISTS above; record it.
+        // Migrations are additive and idempotent: a missing events table is covered by the
+        // IF NOT EXISTS above, the pid columns of events written by earlier versions are added here.
+        for col in ["old_pid", "new_pid"] {
+            let have: bool = conn.query_row("SELECT COUNT(*) > 0 FROM pragma_table_info('events') WHERE name = ?1", params![col], |r| r.get(0))?;
+            if !have {
+                conn.execute_batch(&format!("ALTER TABLE events ADD COLUMN {col} INTEGER;"))?;
+            }
+        }
         let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
         if version < SCHEMA_VERSION {
             conn.execute_batch(&format!("PRAGMA user_version = {SCHEMA_VERSION};"))?;
@@ -273,17 +300,19 @@ impl History {
     }
 
     pub fn record_event(&self, e: &AppEvent) -> Result<()> {
-        self.conn.execute("INSERT INTO events (ts, app, kind, message) VALUES (?1,?2,?3,?4)", params![e.ts, e.app, e.kind, e.message])?;
+        self.conn.execute("INSERT INTO events (ts, app, kind, message, old_pid, new_pid) VALUES (?1,?2,?3,?4,?5,?6)",
+            params![e.ts, e.app, e.kind, e.message, e.old_pid, e.new_pid],
+        )?;
         Ok(())
     }
 
     /// Events of one app in [from, to], newest first.
     pub fn events(&self, app: &str, from: i64, to: i64, limit: usize) -> Result<Vec<AppEvent>> {
         let mut st = self.conn.prepare_cached(
-            "SELECT ts, app, kind, message FROM events WHERE app = ?1 AND ts >= ?2 AND ts <= ?3 ORDER BY ts DESC LIMIT ?4",
+            "SELECT ts, app, kind, message, old_pid, new_pid FROM events WHERE app = ?1 AND ts >= ?2 AND ts <= ?3 ORDER BY ts DESC LIMIT ?4",
         )?;
         let rows = st.query_map(params![app, from, to, limit as i64], |r| {
-            Ok(AppEvent { ts: r.get(0)?, app: r.get(1)?, kind: r.get(2)?, message: r.get(3)? })
+            Ok(AppEvent { ts: r.get(0)?, app: r.get(1)?, kind: r.get(2)?, message: r.get(3)?, old_pid: r.get(4)?, new_pid: r.get(5)? })
         })?;
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
     }
@@ -471,7 +500,7 @@ mod tests {
         assert_eq!(h.app_peak("app_cpu", "com.nobody", now - 86_400, now, now).unwrap(), None);
         // Events: newest first, filtered by app and range, purged with retention.
         for (ts, app, kind) in [(now - 7200, "com.brave.Browser", "alert"), (now - 100, "com.brave.Browser", "restart"), (now - 50, "com.other", "alert")] {
-            h.record_event(&AppEvent { ts, app: app.into(), kind: kind.into(), message: "m".into() }).unwrap();
+            h.record_event(&AppEvent { ts, app: app.into(), kind: kind.into(), message: "m".into(), ..Default::default() }).unwrap();
         }
         let ev = h.events("com.brave.Browser", now - 86_400, now, 10).unwrap();
         assert_eq!(ev.iter().map(|e| e.kind.as_str()).collect::<Vec<_>>(), vec!["restart", "alert"]);
@@ -501,8 +530,9 @@ mod tests {
         let h = History::open(&path).unwrap();
         assert_eq!(h.row_count().unwrap(), 1);
         assert_eq!(h.series("app_cpu", Some("com.x"), 1_799_999_000, 1_800_000_000, 1_800_000_000).unwrap().len(), 1);
-        h.record_event(&AppEvent { ts: 1_800_000_000, app: "com.x".into(), kind: "restart".into(), message: String::new() }).unwrap();
-        assert_eq!(h.events("com.x", 0, 2_000_000_000, 5).unwrap().len(), 1);
+        h.record_event(&AppEvent { ts: 1_800_000_000, app: "com.x".into(), kind: "restart".into(), old_pid: Some(1), new_pid: Some(2), ..Default::default() }).unwrap();
+        let ev = h.events("com.x", 0, 2_000_000_000, 5).unwrap();
+        assert_eq!((ev.len(), ev[0].old_pid, ev[0].new_pid), (1, Some(1), Some(2)));
         let v: i64 = h.conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
         assert_eq!(v, SCHEMA_VERSION);
         drop(h);
@@ -515,21 +545,105 @@ mod tests {
             key: "bundle:com.x".into(),
             app: crate::model::App { bundle_id: Some("com.x".into()), name: "X".into(), ..Default::default() },
             root_pid: root,
+            root_is_main: true,
             pids,
             ..Default::default()
         };
         let snap = |g: AppGroup| Snapshot { apps: vec![g], ..Default::default() };
         let mut d = RestartDetector::default();
-        assert!(d.feed(&snap(group(10, vec![10, 11]))).is_empty()); // first sight
-        assert!(d.feed(&snap(group(10, vec![10, 11, 12]))).is_empty()); // helper spawned
+        let t = 1_000_000;
+        assert!(d.feed(&snap(group(10, vec![10, 11])), t).is_empty()); // first sight
+        assert!(d.feed(&snap(group(10, vec![10, 11, 12])), t + 2).is_empty()); // helper spawned
         // Quit and relaunched between ticks: new main pid, old pids gone.
-        assert_eq!(d.feed(&snap(group(20, vec![20, 21]))), vec![("com.x".to_string(), 10, 20)]);
-        assert!(d.feed(&snap(group(20, vec![20, 21]))).is_empty());
+        assert_eq!(d.feed(&snap(group(20, vec![20, 21])), t + 4), vec![("com.x".to_string(), 10, 20)]);
+        assert!(d.feed(&snap(group(20, vec![20, 21])), t + 6).is_empty());
         // Main exits but a surviving helper becomes the root: not a restart.
-        assert!(d.feed(&snap(group(21, vec![21]))).is_empty());
-        // App absent for a tick, then back: no event (can't tell), and no stale state.
-        assert!(d.feed(&Snapshot::default()).is_empty());
-        assert!(d.feed(&snap(group(30, vec![30]))).is_empty());
+        assert!(d.feed(&snap(group(21, vec![21])), t + 8).is_empty());
+    }
+
+    #[test]
+    fn restart_detection_grace_window_and_cooldown() {
+        let group = |root: i32| AppGroup {
+            key: "bundle:com.x".into(),
+            app: crate::model::App { bundle_id: Some("com.x".into()), name: "X".into(), ..Default::default() },
+            root_pid: root,
+            root_is_main: true,
+            pids: vec![root],
+            ..Default::default()
+        };
+        let snap = |g: AppGroup| Snapshot { apps: vec![g], ..Default::default() };
+        let gone = Snapshot::default();
+        let mut d = RestartDetector::default();
+        let t = 1_000_000;
+        d.feed(&snap(group(10)), t);
+        // Absent for a few samples (slow background refresh), back within the grace window
+        // with another pid: a restart.
+        assert!(d.feed(&gone, t + 6).is_empty());
+        assert!(d.feed(&gone, t + 12).is_empty());
+        assert_eq!(d.feed(&snap(group(20)), t + 18), vec![("com.x".to_string(), 10, 20)]);
+        // Crash loop: further restarts within the cooldown are not reported again...
+        assert!(d.feed(&snap(group(30)), t + 24).is_empty());
+        assert!(d.feed(&snap(group(40)), t + 599).is_empty());
+        // ...but one after it is.
+        assert_eq!(d.feed(&snap(group(50)), t + 18 + 600), vec![("com.x".to_string(), 40, 50)]);
+        // Absent longer than the grace window: the old pid is forgotten, no event.
+        assert!(d.feed(&gone, t + 2000).is_empty());
+        assert!(d.feed(&gone, t + 2100).is_empty());
+        assert!(d.feed(&snap(group(60)), t + 2200).is_empty());
+    }
+
+    /// A group without a real main process (`root_pid` is just the first process seen) never
+    /// produces restart events.
+    #[test]
+    fn restart_detection_needs_a_main_process() {
+        let group = |root: i32| AppGroup {
+            key: "bundle:com.x".into(),
+            app: crate::model::App { bundle_id: Some("com.x".into()), name: "X".into(), ..Default::default() },
+            root_pid: root,
+            root_is_main: false,
+            pids: vec![root, 99],
+            ..Default::default()
+        };
+        let snap = |g: AppGroup| Snapshot { apps: vec![g], ..Default::default() };
+        let mut d = RestartDetector::default();
+        d.feed(&snap(group(10)), 1000);
+        assert!(d.feed(&snap(group(20)), 1002).is_empty());
+    }
+
+    /// An events table written by the previous schema (no pid columns) gains them, and opening
+    /// the file again changes nothing.
+    #[test]
+    fn migrates_events_without_pid_columns() {
+        let dir = std::env::temp_dir().join(format!("pulsebar-mig2-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("h.sqlite");
+        let _ = std::fs::remove_file(&path);
+        {
+            let c = Connection::open(&path).unwrap();
+            c.execute_batch(
+                "CREATE TABLE events (ts INTEGER NOT NULL, app TEXT NOT NULL, kind TEXT NOT NULL, message TEXT NOT NULL);
+                 INSERT INTO events VALUES (1800000000, 'com.x', 'restart', 'X restarted (main pid 1 → 2)');
+                 PRAGMA user_version = 2;",
+            )
+            .unwrap();
+        }
+        for i in 0..2 {
+            let h = History::open(&path).unwrap();
+            let ev = h.events("com.x", 0, 2_000_000_000, 5).unwrap();
+            assert_eq!(ev.len(), 1 + i);
+            assert_eq!((ev.last().unwrap().old_pid, ev.last().unwrap().new_pid), (None, None));
+            assert!(ev.last().unwrap().message.contains("restarted"));
+            if i == 1 {
+                continue;
+            }
+            h.record_event(&AppEvent { ts: 1_800_000_100, app: "com.x".into(), kind: "restart".into(), old_pid: Some(2), new_pid: Some(3), ..Default::default() }).unwrap();
+        }
+        let h = History::open(&path).unwrap();
+        let ev = h.events("com.x", 0, 2_000_000_000, 5).unwrap();
+        assert_eq!(ev.len(), 2);
+        assert_eq!((ev[0].old_pid, ev[0].new_pid), (Some(2), Some(3)));
+        drop(h);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

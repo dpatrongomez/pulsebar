@@ -129,21 +129,27 @@ command (`tests/fixtures/snapshot.json`); MCP protocol and data-scoping tests.
 History is one SQLite file (`history.sqlite`). Every series is kept at five resolutions (1 min → 24 h,
 5 min → 7 d, 30 min → 30 d, 2 h → 6 months, 6 h → 1 year), each capped by the retention chosen in Settings
 (default 90 days). The per-app detail panel reads the `app_cpu`, `app_memory`, `app_energy`, `app_disk` and
-`app_network` series of an app, plus an `events` table (alerts fired for the app, restarts = new main PID).
+`app_network` series of an app, plus an `events` table (alerts fired for the app, restarts = new main PID; a restart is also recognised when the app was absent for up to 2 minutes in between).
 
 Which apps are stored: the top 15 by each of CPU, memory, energy, disk and network at every tick (apps with a
-value of 0 don't qualify). An app outside that set shows only its live values in the detail panel.
+value of 0 don't qualify). In the app lists, rows of apps with recorded history are marked "History"; an app
+outside that set shows only its live values in the detail panel.
 
-Size impact (measured on a real database: 585 728 B for 9 390 rows ≈ **62 B/row** including page overhead; ~65 B is
-used below). One app series produces 1 440 + 288 + 48 + 12 + 4 = 1 792 rows/day while the file fills, and levels
-settle at 6 336 rows per series with 90-day retention (8 552 with 1 year):
+Size impact (measured: ≈ **79 B/row** including page overhead, for per-app rows that carry the bundle id; a small
+database dominated by whole-machine rows gives a lower figure, ~62 B). One app series produces
+1 440 + 288 + 48 + 12 + 4 = 1 792 rows/day while the file fills, and levels settle at 6 336 rows per series with
+90-day retention (8 552 with 1 year):
 
 | | series | rows at 90 d | size at 90 d | size at 1 year |
 |---|---|---|---|---|
-| Before (top 15 × CPU, memory, energy) | ≈ 75 | ≈ 475 k | ≈ 31 MB | ≈ 42 MB |
-| After (≈ 25 busiest apps × 5 metrics) | ≈ 125 | ≈ 790 k | ≈ 51 MB | ≈ 69 MB |
+| Before (top 15 × CPU, memory, energy; measured) | ≈ 45 | ≈ 345 k | ≈ 27 MB | ≈ 36 MB |
+| After (≈ 25 busiest apps × 5 metrics) | ≈ 125 | ≈ 790 k | ≈ 62 MB | ≈ 84 MB |
+| Ceiling (15 × 5 = 75 distinct apps × 5 metrics) | 375 | ≈ 2.4 M | ≈ 187 MB | ≈ 250 MB |
 
-So the detail view adds roughly 20 MB at the default retention. Growth is bounded by the same per-level retention as before; purging runs hourly.
-Events add < 100 B each (a handful per day) and are purged with the same retention. Older databases open unchanged:
-the schema change is additive (`events` table, `PRAGMA user_version = 2`), and disk/network history for apps
+So the detail view adds roughly 35 MB at the default retention on a typical machine (≈ 25 distinct busiest apps);
+the worst case, where all 75 slots are held by different apps, is about 187 MB. These figures are a lower bound: purges leave free pages. Growth is bounded by the same per-level
+retention as before; purging runs hourly. Events add < 100 B each and are purged with the same retention; restarts
+are limited to one per app every 10 minutes, so a crash-looping process can't flood the table.
+Older databases open unchanged:
+the schema change is additive and idempotent (`events` table with `old_pid`/`new_pid` columns, `PRAGMA user_version = 3`), and disk/network history for apps
 starts accumulating after the upgrade.

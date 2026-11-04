@@ -352,6 +352,10 @@ pub struct AppGroup {
     pub process_count: usize,
     pub pids: Vec<i32>,
     pub root_pid: i32,
+    /// `root_pid` is a real main process of the app (an executable in `Contents/MacOS/`, or a
+    /// parentless process of a name-grouped app), not just the first process seen. Not serialized.
+    #[serde(skip)]
+    pub root_is_main: bool,
 }
 
 impl AppGroup {

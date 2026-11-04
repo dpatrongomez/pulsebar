@@ -23,9 +23,17 @@ const METRICS: [RankMetric; 5] = [RankMetric::Cpu, RankMetric::Memory, RankMetri
 
 type Points = Vec<(i64, f64, f64, f64)>;
 
+/// Most points drawn per chart; longer series are reduced in `load` (min/avg/max kept).
+const MAX_POINTS: i64 = 300;
+
 struct Loaded {
     at: Instant,
     range_s: i64,
+    /// Time window shown, [from, to] in seconds.
+    from: i64,
+    to: i64,
+    /// Spacing of the points in `charts`; farther apart than 1.5 steps means no data in between.
+    step_s: i64,
     charts: Vec<(RankMetric, Points)>,
     peaks: Vec<(RankMetric, Peak)>,
     events: Vec<AppEvent>,
@@ -47,12 +55,45 @@ fn series_name(m: RankMetric) -> String {
     format!("app_{}", m.as_str())
 }
 
+/// Reduce `pts` (spaced `res` seconds apart, covering `range_s` seconds from `from`) to at most
+/// `MAX_POINTS` by merging the points of each time bin: the bin's min of mins, mean of avgs and
+/// max of maxes. Bins without data stay empty so gaps survive. Returns the points and their spacing.
+fn downsample(pts: &[(i64, f64, f64, f64)], from: i64, range_s: i64, res: i64) -> (Points, i64) {
+    let bin = (range_s + MAX_POINTS - 1) / MAX_POINTS;
+    if bin <= res {
+        return (pts.to_vec(), res);
+    }
+    let mut out: Points = Vec::new();
+    // Points merged into the last bin of `out`, whose avg is a running sum until the end.
+    let (mut n, mut cur) = (0.0, i64::MIN);
+    for p in pts {
+        let k = (p.0 - from).div_euclid(bin);
+        if k != cur {
+            if let Some(o) = out.last_mut() {
+                o.2 /= n;
+            }
+            (cur, n) = (k, 0.0);
+            out.push((from + k * bin, p.1, 0.0, p.3));
+        }
+        let o = out.last_mut().unwrap();
+        o.1 = o.1.min(p.1);
+        o.3 = o.3.max(p.3);
+        o.2 += p.2;
+        n += 1.0;
+    }
+    if let Some(o) = out.last_mut() {
+        o.2 /= n;
+    }
+    (out, bin)
+}
+
 /// Load the charts, peaks and events of one app from history.
 fn load(h: &history::History, id: &str, range_s: i64) -> Loaded {
     let now = sys::now_s();
     let from = now - range_s;
     let mut charts = Vec::new();
     let mut peaks = Vec::new();
+    let mut step_s = 0;
     for m in METRICS {
         let name = series_name(m);
         let pts = h.series(&name, Some(id), from, now, now).unwrap_or_default();
@@ -61,10 +102,13 @@ fn load(h: &history::History, id: &str, range_s: i64) -> Loaded {
         {
             peaks.push((m, p));
         }
-        charts.push((m, pts.iter().map(|b| (b.time_bucket, b.value_min, b.value_avg, b.value_max)).collect()));
+        let raw: Points = pts.iter().map(|b| (b.time_bucket, b.value_min, b.value_avg, b.value_max)).collect();
+        let (pts, step) = downsample(&raw, from, range_s, pts.first().map_or(1, |b| b.resolution_s));
+        step_s = step_s.max(step);
+        charts.push((m, pts));
     }
     let events = h.events(id, from, now, 50).unwrap_or_default();
-    Loaded { at: Instant::now(), range_s, charts, peaks, events }
+    Loaded { at: Instant::now(), range_s, from, to: now, step_s, charts, peaks, events }
 }
 
 fn format_value(u: &Units, m: RankMetric, v: f64, cores: usize) -> String {
@@ -116,7 +160,7 @@ impl PulseApp {
         if st.loaded.as_ref().is_none_or(|l| l.range_s != st.range_s || l.at.elapsed() > Duration::from_secs(30)) {
             let l = self.shared.history.lock().ok().and_then(|h| h.as_ref().map(|h| load(h, &st.id, st.range_s)));
             if l.is_some() || st.loaded.is_none() {
-                st.loaded = l.or(Some(Loaded { at: Instant::now(), range_s: st.range_s, charts: vec![], peaks: vec![], events: vec![] }));
+                st.loaded = l.or(Some(Loaded { at: Instant::now(), range_s: st.range_s, from: 0, to: 1, step_s: 0, charts: vec![], peaks: vec![], events: vec![] }));
             }
         }
 
@@ -240,7 +284,7 @@ impl PulseApp {
                                 });
                             }
                         });
-                        widgets::history_chart(ui, pts, 90.0, color, &move |v| format_value(&u, m, v, cores));
+                        widgets::history_chart_range(ui, pts, (l.from, l.to), l.step_s, 90.0, color, &move |v| format_value(&u, m, v, cores));
                     });
                     ui.add_space(6.0);
                 }
@@ -256,7 +300,11 @@ impl PulseApp {
                         ui.horizontal_wrapped(|ui| {
                             ui.label(RichText::new(when(e.ts)).size(12.0).weak());
                             widgets::chip(ui, &self.i18n.t(key), color);
-                            ui.label(RichText::new(&e.message).size(12.5));
+                            let text = match (e.kind.as_str(), e.old_pid, e.new_pid) {
+                                ("restart", Some(old), Some(new)) => self.i18n.t("restart_msg").replace("{old}", &old.to_string()).replace("{new}", &new.to_string()),
+                                _ => e.message.clone(),
+                            };
+                            ui.label(RichText::new(text).size(12.5));
                         });
                     }
                     if !l.peaks.is_empty() {
@@ -309,16 +357,44 @@ mod tests {
             ]);
         }
         h.flush().unwrap();
-        h.record_event(&AppEvent { ts: now - 600, app: "com.x".into(), kind: "restart".into(), message: "x".into() }).unwrap();
+        h.record_event(&AppEvent { ts: now - 600, app: "com.x".into(), kind: "restart".into(), old_pid: Some(1), new_pid: Some(2), ..Default::default() }).unwrap();
         let l = load(&h, "com.x", 86_400);
         let (_, cpu) = &l.charts[0];
         let (_, mem) = &l.charts[1];
-        // ≥ 24 h worth of 1-minute buckets (the window start is aligned down to a bucket).
-        assert!(cpu.len() >= 1439 && mem.len() >= 1439, "{} {}", cpu.len(), mem.len());
-        assert!(cpu.last().unwrap().0 - cpu[0].0 >= 86_400 - 120);
+        // Reduced from ≥ 1439 one-minute buckets to ~300 points that still span the 24 h.
+        assert!(cpu.len() >= 290 && mem.len() >= 290, "{} {}", cpu.len(), mem.len());
+        assert!(cpu.last().unwrap().0 - cpu[0].0 >= 86_400 - 2 * l.step_s);
         // No disk/network data was recorded for this app: empty charts, no peaks for them.
         assert!(l.charts[3].1.is_empty() && l.charts[4].1.is_empty());
         assert!(l.peaks.iter().any(|(m, p)| *m == RankMetric::Cpu && p.value == 11.0));
         assert_eq!(l.events.len(), 1);
+        assert_eq!((l.events[0].old_pid, l.events[0].new_pid), (Some(1), Some(2)));
+        // 24 h at 1-minute buckets is reduced to at most MAX_POINTS, keeping the extremes.
+        assert!(cpu.len() as i64 <= MAX_POINTS + 1 && mem.len() as i64 <= MAX_POINTS + 1 && l.step_s > 60, "{} {}", cpu.len(), l.step_s);
+        assert_eq!(cpu.iter().map(|p| p.3).fold(0.0, f64::max), 11.0);
+        assert_eq!(cpu.iter().map(|p| p.1).fold(f64::MAX, f64::min), 5.0);
+        assert_eq!((l.from, l.to - l.from), (l.to - 86_400, 86_400));
+    }
+
+    #[test]
+    fn downsample_keeps_extremes_and_gaps() {
+        let from = 1_000_000;
+        let range = 7 * 86_400;
+        // 5-minute buckets over 7 d, with a day without data in the middle.
+        let pts: Points = (0..2016)
+            .map(|i| (from + i * 300, 1.0 + (i % 10) as f64, 2.0 + (i % 10) as f64, 3.0 + (i % 10) as f64))
+            .filter(|p| p.0 < from + 3 * 86_400 || p.0 >= from + 4 * 86_400)
+            .collect();
+        let (out, step) = downsample(&pts, from, range, 300);
+        assert!(out.len() as i64 <= MAX_POINTS, "{}", out.len());
+        assert!(step >= range / MAX_POINTS);
+        assert_eq!(out.iter().map(|p| p.3).fold(0.0, f64::max), 12.0);
+        assert_eq!(out.iter().map(|p| p.1).fold(f64::MAX, f64::min), 1.0);
+        assert!(out.iter().all(|p| p.1 <= p.2 && p.2 <= p.3));
+        // The empty day shows up as a jump larger than 1.5 steps between two consecutive points.
+        assert!(out.windows(2).any(|w| (w[1].0 - w[0].0) as f64 > step as f64 * 1.5));
+        // Short ranges are left alone.
+        let (same, s) = downsample(&pts[..30], from, 3600, 60);
+        assert_eq!((same.len(), s), (30, 60));
     }
 }

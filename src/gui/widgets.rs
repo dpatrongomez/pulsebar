@@ -44,28 +44,58 @@ pub fn num(settings: &Settings, s: impl Into<String>, size: f32) -> RichText {
     }
 }
 
-/// Line chart with min/max band for history buckets: (t, min, avg, max).
+/// Line chart with min/max band for history buckets: (t, min, avg, max). The time axis spans
+/// the first to the last point and the line is continuous.
 pub fn history_chart(ui: &mut egui::Ui, pts: &[(i64, f64, f64, f64)], height: f32, color: Color32, fmt: &dyn Fn(f64) -> String) {
+    let range = match (pts.first(), pts.last()) {
+        (Some(a), Some(b)) => (a.0, b.0),
+        _ => (0, 1),
+    };
+    history_chart_range(ui, pts, range, 0, height, color, fmt);
+}
+
+/// Like [`history_chart`], but the x axis covers `range` = (from, to) in seconds whatever data
+/// there is, so partial history looks partial. With `step_s > 0` the line is broken wherever two
+/// consecutive points are more than 1.5 steps apart (a gap with no data).
+pub fn history_chart_range(ui: &mut egui::Ui, pts: &[(i64, f64, f64, f64)], range: (i64, i64), step_s: i64, height: f32, color: Color32, fmt: &dyn Fn(f64) -> String) {
     let width = ui.available_width();
     let (resp, painter) = ui.allocate_painter(Vec2::new(width, height), Sense::hover());
+    // Charts scrolled out of view cost nothing.
+    if !ui.is_rect_visible(resp.rect) {
+        return;
+    }
     let r = resp.rect.shrink2(Vec2::new(4.0, 8.0));
     painter.rect_stroke(resp.rect, 6.0, Stroke::new(1.0, ui.visuals().widgets.noninteractive.bg_stroke.color), egui::StrokeKind::Inside);
     if pts.len() < 2 {
         painter.text(r.center(), egui::Align2::CENTER_CENTER, "Not enough history yet", egui::FontId::proportional(14.0), ui.visuals().weak_text_color());
         return;
     }
-    let t0 = pts[0].0 as f64;
-    let t1 = pts[pts.len() - 1].0 as f64;
+    let (t0, t1) = (range.0 as f64, range.1 as f64);
     let hi = pts.iter().map(|p| p.3).fold(0.0, f64::max).max(1e-9) * 1.1;
-    let map = |t: i64, v: f64| Pos2::new(r.left() + r.width() * ((t as f64 - t0) / (t1 - t0).max(1.0)) as f32, r.bottom() - r.height() * (v / hi) as f32);
-    let mut band: Vec<Pos2> = pts.iter().map(|p| map(p.0, p.3)).collect();
-    band.extend(pts.iter().rev().map(|p| map(p.0, p.1)));
-    // Band as thin quads (polygon may be concave).
-    for w in pts.windows(2) {
-        let quad = vec![map(w[0].0, w[0].3), map(w[1].0, w[1].3), map(w[1].0, w[1].1), map(w[0].0, w[0].1)];
-        painter.add(egui::Shape::convex_polygon(quad, color.gamma_multiply(0.12), Stroke::NONE));
+    let map = |t: i64, v: f64| Pos2::new(r.left() + r.width() * (((t as f64 - t0) / (t1 - t0).max(1.0)).clamp(0.0, 1.0)) as f32, r.bottom() - r.height() * (v / hi) as f32);
+    // Split into runs of consecutive points.
+    let gap = (step_s as f64 * 1.5) as i64;
+    let mut runs: Vec<&[(i64, f64, f64, f64)]> = Vec::new();
+    let mut start = 0;
+    for i in 1..pts.len() {
+        if step_s > 0 && pts[i].0 - pts[i - 1].0 > gap {
+            runs.push(&pts[start..i]);
+            start = i;
+        }
     }
-    painter.add(egui::Shape::line(pts.iter().map(|p| map(p.0, p.2)).collect(), Stroke::new(1.8, color)));
+    runs.push(&pts[start..]);
+    for run in runs {
+        if run.len() == 1 {
+            painter.circle_filled(map(run[0].0, run[0].2), 1.8, color);
+            continue;
+        }
+        // Min/max band as thin quads (a polygon may be concave).
+        for w in run.windows(2) {
+            let quad = vec![map(w[0].0, w[0].3), map(w[1].0, w[1].3), map(w[1].0, w[1].1), map(w[0].0, w[0].1)];
+            painter.add(egui::Shape::convex_polygon(quad, color.gamma_multiply(0.12), Stroke::NONE));
+        }
+        painter.add(egui::Shape::line(run.iter().map(|p| map(p.0, p.2)).collect(), Stroke::new(1.8, color)));
+    }
     painter.text(r.left_top(), egui::Align2::LEFT_TOP, fmt(hi / 1.1), egui::FontId::proportional(11.0), ui.visuals().weak_text_color());
     if let Some(pos) = resp.hover_pos() {
         let frac = ((pos.x - r.left()) / r.width()).clamp(0.0, 1.0) as f64;

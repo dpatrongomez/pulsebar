@@ -146,14 +146,8 @@ pub fn spawn(settings: Settings, role: Role) -> Arc<Shared> {
 /// Apps kept in history: the top N by each of CPU, memory, energy, disk and network.
 pub const TRACKED_PER_METRIC: usize = 15;
 
-/// Metrics written to history per tick (whole machine) and per app.
-pub fn history_samples(s: &Snapshot) -> (Vec<(String, f64)>, Vec<(String, String, f64)>) {
-    let mut machine: Vec<(String, f64)> = s.frames.iter().filter(|f| f.available).map(|f| (f.metric_kind.as_str().to_string(), f.value)).collect();
-    // Separate series for the Overview's "Written today" / "Downloaded" totals.
-    machine.push(("disk_write".into(), s.machine.disk.write_bps));
-    machine.push(("net_down".into(), s.machine.network.rx_bps));
-    // Per-app series for every app that is among the busiest by any metric, so the app detail
-    // view has all five charts. Keys of the set are history ids (bundle id, else name).
+/// Apps whose per-app series are written to history: those among the busiest by any metric.
+pub fn tracked_apps(s: &Snapshot) -> Vec<&AppGroup> {
     let mut tracked: Vec<&AppGroup> = Vec::new();
     for m in RankMetric::ALL {
         // Idle apps (value 0) don't earn a place: they'd only fill the ranking by name.
@@ -163,8 +157,19 @@ pub fn history_samples(s: &Snapshot) -> (Vec<(String, f64)>, Vec<(String, String
             }
         }
     }
+    tracked
+}
+
+/// Metrics written to history per tick (whole machine) and per app.
+pub fn history_samples(s: &Snapshot) -> (Vec<(String, f64)>, Vec<(String, String, f64)>) {
+    let mut machine: Vec<(String, f64)> = s.frames.iter().filter(|f| f.available).map(|f| (f.metric_kind.as_str().to_string(), f.value)).collect();
+    // Separate series for the Overview's "Written today" / "Downloaded" totals.
+    machine.push(("disk_write".into(), s.machine.disk.write_bps));
+    machine.push(("net_down".into(), s.machine.network.rx_bps));
+    // Per-app series for every app that is among the busiest by any metric, so the app detail
+    // view has all five charts. Keys of the set are history ids (bundle id, else name).
     let mut apps = Vec::new();
-    for a in tracked {
+    for a in tracked_apps(s) {
         let id = history::app_id(a);
         for m in RankMetric::ALL {
             apps.push((id.clone(), format!("app_{}", m.as_str()), a.metric(m)));
@@ -216,9 +221,8 @@ fn run(sh: Arc<Shared>, settings: Settings) {
                 samples.extend(apps.iter().map(|(a, m, v)| Sample { app: Some(a), metric: m, value: *v }));
                 h.record(now, &samples);
                 let _ = h.maintain(now, st.retention.seconds(), 10);
-                for (id, old, new) in restarts.feed(&snap) {
-                    let name = snap.apps.iter().find(|g| history::app_id(g) == id).map(|g| g.app.name.clone()).unwrap_or_else(|| id.clone());
-                    let _ = h.record_event(&AppEvent { ts: now, app: id, kind: "restart".into(), message: format!("{name} restarted (main pid {old} → {new})") });
+                for (id, old, new) in restarts.feed(&snap, now) {
+                    let _ = h.record_event(&AppEvent { ts: now, app: id, kind: "restart".into(), old_pid: Some(old), new_pid: Some(new), ..Default::default() });
                 }
             }
             let ae = alert_engine.as_mut().unwrap();
@@ -234,7 +238,7 @@ fn run(sh: Arc<Shared>, settings: Settings) {
                 if let Some(h) = sh.history.lock().unwrap().as_ref() {
                     for a in fired.iter().filter(|a| !a.app_key.is_empty()) {
                         if let Some(g) = snap.apps.iter().find(|g| g.key == a.app_key) {
-                            let _ = h.record_event(&AppEvent { ts: a.at, app: history::app_id(g), kind: "alert".into(), message: a.message.clone() });
+                            let _ = h.record_event(&AppEvent { ts: a.at, app: history::app_id(g), kind: "alert".into(), message: a.message.clone(), ..Default::default() });
                         }
                     }
                 }

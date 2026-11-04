@@ -42,7 +42,6 @@ const TABLE: &[Row] = &[
 const TABLE_EN_ES: &[(&str, &str, &str)] = &[
     ("details",          "Details", "Detalles"),
     ("close",            "Close", "Cerrar"),
-    ("app_details",      "App details", "Detalles de la app"),
     ("energy",           "Energy", "Energía"),
     ("ports",            "Ports", "Puertos"),
     ("signature",        "Code signature", "Firma de código"),
@@ -53,6 +52,8 @@ const TABLE_EN_ES: &[(&str, &str, &str)] = &[
     ("peaks",            "Peaks", "Picos"),
     ("event_alert",      "Alert", "Alerta"),
     ("event_restart",    "Restart", "Reinicio"),
+    ("restart_msg",      "Main process restarted (pid {old} → {new})", "Proceso principal reiniciado (pid {old} → {new})"),
+    ("has_history",      "History", "Historial"),
     ("not_running",      "This app is not running. Showing recorded history only.", "Esta app no está en ejecución. Solo se muestra el historial guardado."),
     ("no_app_history",   "Not enough history yet. History is kept for the busiest apps (top 15 by CPU, memory, energy, disk or network).", "Aún no hay suficiente historial. Se guarda para las apps más activas (las 15 primeras por CPU, memoria, energía, disco o red)."),
     ("version",          "Version", "Versión"),

@@ -306,6 +306,8 @@ impl PulseApp {
                 None => snap.top_apps(m, n),
             };
             let max = top.iter().map(|a| a.metric(m)).fold(0.0, f64::max).max(1e-9);
+            // Apps whose history is being recorded (the detail panel has charts for them).
+            let with_history: std::collections::HashSet<&str> = crate::daemon::tracked_apps(snap).into_iter().map(|a| a.key.as_str()).collect();
             let hover_fill = if ui.visuals().dark_mode { Color32::from_rgb(38, 38, 42) } else { Color32::from_rgb(244, 244, 247) };
             for a in top {
                 shown_apps.push(a.key.clone());
@@ -341,6 +343,7 @@ impl PulseApp {
                         let name = RichText::new(&a.app.name).size(15.0).strong();
                         name_rect = ui.add(egui::Label::new(if highlighted { name.color(color) } else { name.color(strong) }).truncate()).rect;
                         let procs = if a.process_count == 1 { "1 process".to_string() } else { format!("{} processes", a.process_count) };
+                        let procs = if with_history.contains(a.key.as_str()) && a.key != crate::grouping::SYSTEM_KEY { format!("{procs} · {}", self.i18n.t("has_history")) } else { procs };
                         ui.label(RichText::new(procs).size(12.5).weak());
                     });
                     if (over_row || open || highlighted) && a.key != crate::grouping::SYSTEM_KEY {

@@ -450,3 +450,11 @@ kbd.inspect = "Open the Process Inspector"
 kbd.quit = "Quit the selected app or process"
 kbd.force_quit = "Force Quit the selected app"
 kbd.note = "Quit and Force Quit always ask for confirmation. Shortcuts are paused while you type in a text field."
+
+# --- search (⌘F)
+search.placeholder = "Search apps, processes, PID, port…"
+search.no_matches = "No matches"
+search.apps_count = "Apps: {n}"
+search.more = "+{n} more"
+search.procs_of.one = "{hits} of {n} process"
+search.procs_of.other = "{hits} of {n} processes"

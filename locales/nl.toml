@@ -28,3 +28,9 @@ cancel = "Annuleer"
 stop = "Stoppen…"
 stop_all = "Alles stoppen…"
 reset_layout = "Indeling herstellen"
+
+# --- search (⌘F)
+search.placeholder = "Zoek apps, processen, PID, poort…"
+search.no_matches = "Geen resultaten"
+search.apps_count = "Apps: {n}"
+search.more = "+{n} meer"

@@ -28,3 +28,9 @@ cancel = "キャンセル"
 stop = "停止…"
 stop_all = "すべて停止…"
 reset_layout = "レイアウトをリセット"
+
+# --- search (⌘F)
+search.placeholder = "アプリ・プロセス・PID・ポートを検索…"
+search.no_matches = "一致なし"
+search.apps_count = "アプリ: {n}"
+search.more = "+{n} 件"

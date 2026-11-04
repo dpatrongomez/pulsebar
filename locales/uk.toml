@@ -28,3 +28,9 @@ cancel = "Скасувати"
 stop = "Зупинити…"
 stop_all = "Зупинити все…"
 reset_layout = "Скинути розкладку"
+
+# --- search (⌘F)
+search.placeholder = "Пошук програм, процесів, PID, порту…"
+search.no_matches = "Нічого не знайдено"
+search.apps_count = "Застосунки: {n}"
+search.more = "+{n} ще"

@@ -153,6 +153,12 @@ pub struct FrozenOrder {
     /// Sort the order was captured under; a different sort (header click) invalidates it.
     pub apps_sort: SortSpec,
     pub procs_sort: SortSpec,
+    /// Search query the order was captured under; a different query invalidates it (the caller
+    /// checks it, as the query lives outside the sort settings).
+    pub query: String,
+    /// Search matches captured with the order; reused while metric and query are unchanged, so the
+    /// set of rows can only shrink (ended processes) under the pointer, never swap meaning.
+    pub matches: Option<crate::search::Matches>,
 }
 
 impl FrozenOrder {
@@ -317,7 +323,7 @@ mod tests {
     }
 
     fn frozen(m: RankMetric, apps: SortSpec, procs: SortSpec) -> FrozenOrder {
-        FrozenOrder { metric: m, apps: vec!["b".into(), "a".into()], procs: HashMap::new(), apps_sort: apps, procs_sort: procs }
+        FrozenOrder { metric: m, apps: vec!["b".into(), "a".into()], procs: HashMap::new(), apps_sort: apps, procs_sort: procs, query: String::new(), matches: None }
     }
 
     #[test]

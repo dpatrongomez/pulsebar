@@ -28,3 +28,9 @@ cancel = "Avbryt"
 stop = "Stoppa…"
 stop_all = "Stoppa alla…"
 reset_layout = "Återställ layout"
+
+# --- search (⌘F)
+search.placeholder = "Sök appar, processer, PID, port…"
+search.no_matches = "Inga träffar"
+search.apps_count = "Appar: {n}"
+search.more = "+{n} till"

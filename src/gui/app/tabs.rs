@@ -339,18 +339,26 @@ impl PulseApp {
         let mut app_click: Option<SortKey> = None;
         let mut proc_click: Option<SortKey> = None;
         let mut toggle_extras = false;
-        // The frozen order only applies to the sort it was captured under.
-        let frozen_ok = self.frozen.as_ref().is_some_and(|f| f.applies_to(m, app_sort, proc_sort));
         let mut shown_apps: Vec<String> = vec![];
         let mut shown_procs: HashMap<String, Vec<i32>> = HashMap::new();
         let danger = self.pal(ui.ctx()).danger;
         let card_fill = widgets::card_fill(ui.visuals().dark_mode);
+        // Search (⌘F): one pass over the snapshot per frame; the query lives per tab.
+        let query = self.search_field(ui);
+        // The frozen order only applies to the sort and the query it was captured under.
+        let frozen_ok = self.frozen.as_ref().is_some_and(|f| f.applies_to(m, app_sort, proc_sort) && f.query == query);
+        // While the pointer is over the list the matches stay frozen with the order (same query).
+        let frozen_matches = self.frozen.as_mut().filter(|f| f.metric == m && f.query == query).and_then(|f| f.matches.take());
+        let matches = frozen_matches.or_else(|| crate::search::Matcher::new(&query, snap).map(|mt| crate::search::filter(snap, &mt)));
         let card = egui::Frame::new().fill(card_fill).corner_radius(16.0).inner_margin(egui::Margin::symmetric(10, 14)).show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
                 ui.add_space(10.0);
                 ui.label(RichText::new(self.t("mem.app")).size(14.0).weak());
-                let summary = self.tf("applist.summary", &[("procs", &self.i18n.tn("n.processes", snap.processes.len(), &[])), ("apps", &self.i18n.tn("n.apps", snap.apps.len(), &[]))]);
+                let summary = match &matches {
+                    Some(mt) => format!("· {}", self.tf("search.apps_count", &[("n", &mt.apps.len().to_string())])),
+                    None => self.tf("applist.summary", &[("procs", &self.i18n.tn("n.processes", snap.processes.len(), &[])), ("apps", &self.i18n.tn("n.apps", snap.apps.len(), &[]))]),
+                };
                 ui.label(RichText::new(summary).size(12.0).weak());
                 ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
                     ui.add_space(10.0);
@@ -389,15 +397,27 @@ impl PulseApp {
             // While the pointer is over the list (or after keyboard navigation), keep last frame's
             // order: values keep updating, rows don't move. New apps appear once the pointer leaves.
             // The list is the top `n` apps by the chosen metric column (the tab's metric when
-            // sorting by name or PID), ordered by that column.
-            let top: Vec<&AppGroup> = match self.frozen.as_ref().filter(|_| frozen_ok) {
+            // sorting by name or PID), ordered by that column. A search shows every match (not
+            // just the top `n`); a frozen order captured under another query does not apply.
+            let mut top: Vec<&AppGroup> = match self.frozen.as_ref().filter(|_| frozen_ok) {
                 Some(f) => sorting::resolve_frozen_apps(&f.apps, &snap.apps),
                 None => {
-                    let mut v = snap.top_apps(app_sort.key.rank_metric().unwrap_or(m), n);
+                    let mut v = snap.top_apps(app_sort.key.rank_metric().unwrap_or(m), if matches.is_some() { usize::MAX } else { n });
                     sorting::sort_apps(&mut v, app_sort);
                     v
                 }
             };
+            if let Some(mt) = &matches {
+                top.retain(|a| mt.apps.contains_key(&a.key));
+                if top.is_empty() {
+                    ui.add_space(8.0);
+                    ui.horizontal(|ui| {
+                        ui.add_space(10.0);
+                        ui.label(RichText::new(self.i18n.t("search.no_matches")).weak());
+                    });
+                    ui.add_space(8.0);
+                }
+            }
             let max = top.iter().map(|a| a.metric(m)).fold(0.0, f64::max).max(1e-9);
             let hover_fill = if ui.visuals().dark_mode { Color32::from_rgb(38, 38, 42) } else { Color32::from_rgb(244, 244, 247) };
             for a in top {
@@ -405,7 +425,10 @@ impl PulseApp {
                 let highlighted = self.highlight.as_deref() == Some(a.key.as_str());
                 // The focus ring marks the one selected row: the app itself, or one of its processes.
                 let selected_app = highlighted && self.sel_proc.is_none();
-                let open = *self.expanded.get(&a.key).unwrap_or(&false);
+                // An app that matched only through some of its processes opens to show them.
+                let hit = matches.as_ref().and_then(|mt| mt.apps.get(&a.key));
+                let process_hits = matches!(hit, Some(crate::search::AppHit::Processes(_)));
+                let open = process_hits || *self.expanded.get(&a.key).unwrap_or(&false);
                 let (rect, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 58.0), egui::Sense::CLICK);
                 // contains_pointer, not hovered: hovered() turns false while the pointer is on the
                 // row's own Quit buttons, which would hide them under the cursor.
@@ -447,10 +470,18 @@ impl PulseApp {
                         ui.spacing_mut().item_spacing.y = 1.0;
                         let name = RichText::new(&a.app.name).size(15.0).strong();
                         ui.add(egui::Label::new(if highlighted { name.color(color) } else { name.color(strong) }).truncate());
-                        let procs = self.i18n.tn("n.processes", a.process_count, &[]);
+                        let procs = match (process_hits, &matches) {
+                            (true, Some(mt)) => {
+                                let hits = a.pids.iter().filter(|p| mt.pids.contains(p)).count();
+                                self.i18n.tn("search.procs_of", a.process_count, &[("hits", &hits.to_string())])
+                            }
+                            _ => self.i18n.tn("n.processes", a.process_count, &[]),
+                        };
                         ui.label(RichText::new(procs).size(12.5).weak());
                     });
-                    if (over_row || open || highlighted) && a.key != crate::grouping::SYSTEM_KEY {
+                    // Groups opened by a search show only some processes: no standing whole-app
+                    // buttons there, just on hover.
+                    if (over_row || highlighted || (open && !process_hits)) && a.key != crate::grouping::SYSTEM_KEY {
                         ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
                             if widgets::icon_button(ui, ActionIcon::ForceQuit, danger, &(self.i18n.t("force_quit") + "…")).clicked() {
                                 action = Some((Target::App(a.key.clone()), Mode::ForceQuit));
@@ -461,7 +492,7 @@ impl PulseApp {
                         });
                     }
                 });
-                if resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                if resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() && !process_hits {
                     self.expanded.insert(a.key.clone(), !open);
                     self.highlight = Some(a.key.clone());
                     self.sel_proc = None;
@@ -473,6 +504,9 @@ impl PulseApp {
                 }
                 if open {
                     let mut procs: Vec<&Process> = a.pids.iter().filter_map(|p| snap.process(*p)).collect();
+                    if let (true, Some(mt)) = (process_hits, &matches) {
+                        procs.retain(|p| mt.pids.contains(&p.pid));
+                    }
                     let frozen_pids = self.frozen.as_ref().filter(|_| frozen_ok).and_then(|f| f.procs.get(&a.key));
                     match frozen_pids {
                         Some(order) => sorting::follow_frozen(&mut procs, order),
@@ -511,7 +545,9 @@ impl PulseApp {
                         // contains_pointer, not hovered: hovered() is false while the pointer is on
                         // the row's own buttons, which would hide them under the cursor.
                         let over = resp.contains_pointer();
-                        if over || selected {
+                        if matches.as_ref().is_some_and(|mt| mt.pids.contains(&p.pid)) {
+                            ui.painter().rect_filled(rect, 10.0, color.gamma_multiply(0.22));
+                        } else if over || selected {
                             ui.painter().rect_filled(rect, 10.0, hover_fill);
                         }
                         if selected {
@@ -546,6 +582,12 @@ impl PulseApp {
                             });
                         }
                     }
+                    if procs.len() > 200 {
+                        ui.horizontal(|ui| {
+                            ui.add_space(14.0 + SUB_INDENT);
+                            ui.label(RichText::new(self.tf("search.more", &[("n", &(procs.len() - 200).to_string())])).size(12.5).weak());
+                        });
+                    }
                     ui.add_space(6.0);
                 }
             }
@@ -562,7 +604,7 @@ impl PulseApp {
             .collect();
         // A confirmation dialog on top of the list doesn't count as hovering it.
         let over_list = (ui.rect_contains_pointer(card.response.rect) || self.key_nav_active()) && self.confirm.is_none() && action.is_none();
-        self.frozen = over_list.then_some(FrozenOrder { metric: m, apps: shown_apps, procs: shown_procs, apps_sort: app_sort, procs_sort: proc_sort });
+        self.frozen = over_list.then_some(FrozenOrder { metric: m, apps: shown_apps, procs: shown_procs, query: query.clone(), matches, apps_sort: app_sort, procs_sort: proc_sort });
         // Header clicks are explicit: persist the choice. A changed sort invalidates the frozen
         // order by itself (`FrozenOrder::applies_to`), so the next frame re-sorts immediately.
         if app_click.is_some() || proc_click.is_some() || toggle_extras {
@@ -603,6 +645,54 @@ impl PulseApp {
         if let Some(pid) = inspect {
             self.open_inspector(snap, pid);
         }
+    }
+
+    /// The search field above an app list. Returns the current query (stored per tab). ⌘F focuses
+    /// it; Esc clears it (unless a dialog is open).
+    fn search_field(&mut self, ui: &mut egui::Ui) -> String {
+        let tab = self.tab;
+        let mut query = self.search.get(&tab).cloned().unwrap_or_default();
+        let hint = self.i18n.t("search.placeholder");
+        ui.horizontal(|ui| {
+            let clear_w = if query.is_empty() { 0.0 } else { 28.0 };
+            // Match the cards: rounded, card-coloured field.
+            let fill = widgets::card_fill(ui.visuals().dark_mode);
+            ui.visuals_mut().extreme_bg_color = fill;
+            let wd = &mut ui.visuals_mut().widgets;
+            for w in [&mut wd.inactive, &mut wd.hovered, &mut wd.active] {
+                w.corner_radius = 10.0.into();
+            }
+            let edit = egui::TextEdit::singleline(&mut query)
+                .id(egui::Id::new(("app-search", tab)))
+                .hint_text(hint)
+                .margin(egui::Margin::symmetric(10, 6))
+                .desired_width(ui.available_width() - clear_w - if clear_w > 0.0 { ui.spacing().item_spacing.x } else { 0.0 });
+            let resp = ui.add(edit);
+            if std::mem::take(&mut self.focus_search) {
+                resp.request_focus();
+                resp.scroll_to_me(None);
+            }
+            // Esc is a global "clear search" unless a dialog is open (it denies/cancels there); the
+            // field must not keep receiving keys behind a dialog.
+            if self.dialog_open() {
+                if resp.has_focus() {
+                    resp.surrender_focus();
+                }
+            } else if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                query.clear();
+                resp.surrender_focus();
+            }
+            if !query.is_empty() && ui.add_sized([clear_w, resp.rect.height()], egui::Button::new("✕").frame(false)).clicked() {
+                query.clear();
+            }
+        });
+        ui.add_space(6.0);
+        if query.is_empty() {
+            self.search.remove(&tab);
+        } else {
+            self.search.insert(tab, query.clone());
+        }
+        query
     }
 
     /// One list row inside a section: leading glyph/icon, title + subtitle, trailing widgets.

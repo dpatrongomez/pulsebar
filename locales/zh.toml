@@ -28,3 +28,9 @@ cancel = "取消"
 stop = "停止…"
 stop_all = "全部停止…"
 reset_layout = "重置布局"
+
+# --- search (⌘F)
+search.placeholder = "搜索应用、进程、PID、端口…"
+search.no_matches = "无匹配项"
+search.apps_count = "应用: {n}"
+search.more = "+{n} 更多"

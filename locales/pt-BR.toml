@@ -28,3 +28,9 @@ cancel = "Cancelar"
 stop = "Parar…"
 stop_all = "Parar tudo…"
 reset_layout = "Redefinir layout"
+
+# --- search (⌘F)
+search.placeholder = "Buscar apps, processos, PID, porta…"
+search.no_matches = "Nenhum resultado"
+search.apps_count = "Apps: {n}"
+search.more = "+{n} mais"

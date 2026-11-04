@@ -151,6 +151,10 @@ pub struct PulseApp {
     started: Option<Instant>,
     screenshot_requested: bool,
     series_cache: HashMap<String, (Instant, Vec<f64>)>,
+    /// Search query per tab (kept while the window is open).
+    search: HashMap<Tab, String>,
+    /// Set by ⌘F; the visible app list's search field takes focus on the next paint.
+    focus_search: bool,
 }
 
 /// How long the app list keeps its order after the last keyboard navigation.
@@ -189,6 +193,8 @@ impl PulseApp {
             started: None,
             screenshot_requested: false,
             series_cache: HashMap::new(),
+            search: HashMap::new(),
+            focus_search: false,
             shared,
             settings,
         };
@@ -277,6 +283,11 @@ impl PulseApp {
         self.inspector = Some(InspectorState { detail: inspector::inspect(snap, pid, false), rx: Some(rx) });
     }
 
+    /// A confirmation or MCP approval dialog is showing.
+    fn dialog_open(&self) -> bool {
+        self.confirm.is_some() || !self.pending.is_empty()
+    }
+
     /// Navigation requests from the menu bar agent (nav.json).
     fn handle_nav(&mut self) {
         if self.last_nav_poll.elapsed() < Duration::from_millis(300) {
@@ -288,6 +299,10 @@ impl PulseApp {
             self.nav_seen = nav.at_ms;
             self.tab = nav.tab;
             self.scroll_to_highlight = nav.app.is_some();
+            // A search on the target tab could hide the app being opened.
+            if nav.app.is_some() {
+                self.search.remove(&nav.tab);
+            }
             self.highlight = nav.app;
             self.sel_proc = None;
             show_app();
@@ -1393,6 +1408,11 @@ impl eframe::App for PulseApp {
         let focused = ctx.input(|i| i.viewport().focused.unwrap_or(true));
         self.shared.foreground.store(focused, Ordering::Relaxed);
         self.handle_nav();
+        // ⌘F focuses the search field of the current tab's app list.
+        // Ignored while a dialog is open, like Esc in the search field.
+        if ctx.input_mut(|i| i.consume_shortcut(&egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::F))) && !self.dialog_open() {
+            self.focus_search = true;
+        }
         if self.last_pending_poll.elapsed() > Duration::from_secs(1) {
             let fresh = actions::list_pending();
             if !fresh.is_empty() && self.pending.is_empty() {
@@ -1446,6 +1466,8 @@ impl eframe::App for PulseApp {
                 Tab::Settings => self.settings_tab(ui, ctx),
             });
         });
+        // Tabs without an app list ignore ⌘F; don't let the request linger into the next tab.
+        self.focus_search = false;
         self.dialogs(ctx, &snap);
         self.scroll_to_sel = false;
         self.text_focus = ctx.output(|o| o.ime.is_some());

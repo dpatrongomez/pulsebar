@@ -449,3 +449,11 @@ kbd.inspect = "Abrir el inspector de procesos"
 kbd.quit = "Salir de la app o proceso seleccionado"
 kbd.force_quit = "Forzar salida de la app seleccionada"
 kbd.note = "Salir y Forzar salida siempre piden confirmación. Los atajos se pausan mientras escribes en un campo de texto."
+
+# --- search (⌘F)
+search.placeholder = "Buscar apps, procesos, PID, puerto…"
+search.no_matches = "Sin resultados"
+search.apps_count = "Apps: {n}"
+search.more = "+{n} más"
+search.procs_of.one = "{hits} de {n} proceso"
+search.procs_of.other = "{hits} de {n} procesos"

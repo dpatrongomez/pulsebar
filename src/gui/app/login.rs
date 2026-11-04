@@ -16,13 +16,15 @@ pub(super) struct LoginUi {
     error: Option<String>,
     /// First-launch offer still pending (shown once, then never again).
     banner: bool,
+    /// The offer has been recorded as shown (done the first time the banner is drawn).
+    offer_recorded: bool,
 }
 
 impl LoginUi {
     pub(super) fn new() -> Self {
         let status = login_item::status();
         let banner = login_item::should_offer(&status, login_item::was_offered());
-        Self { status, checked: Instant::now(), error: None, banner }
+        Self { status, checked: Instant::now(), error: None, banner, offer_recorded: false }
     }
 }
 
@@ -42,13 +44,13 @@ impl PulseApp {
             }
             Err(e) => {
                 self.login.status = login_item::status();
-                self.login.error = Some(format!("{}: {e}", self.i18n.t("login.error")));
+                self.login.error = Some(format!("{}: {}", self.i18n.t("login.error"), e.localized));
             }
         }
         self.login.checked = Instant::now();
     }
 
-    /// One-time offer at the top of the window (not a modal). Either answer dismisses it for good.
+    /// One-time offer at the top of the window (not a modal). It is recorded as offered as soon as it is drawn, so ignoring it does not bring it back.
     pub(super) fn login_banner(&mut self, ui: &mut egui::Ui) {
         if !self.login.banner {
             return;
@@ -58,6 +60,10 @@ impl PulseApp {
             // Already enabled (e.g. from System Settings) or not possible: nothing to offer.
             self.login.banner = false;
             return;
+        }
+        if !self.login.offer_recorded {
+            login_item::mark_offered();
+            self.login.offer_recorded = true;
         }
         let mut answer: Option<bool> = None;
         super::widgets::card(ui, |ui| {
@@ -74,10 +80,16 @@ impl PulseApp {
         });
         ui.add_space(10.0);
         if let Some(yes) = answer {
-            login_item::mark_offered();
             self.login.banner = false;
             if yes {
+                // The banner is gone, so report the outcome as a toast (visible on any tab).
                 self.login_set(true);
+                if let Some(e) = self.login.error.clone() {
+                    self.toast(e);
+                } else if self.login.status == LoginStatus::RequiresApproval {
+                    let msg = self.i18n.t("login.requires_approval");
+                    self.toast(msg);
+                }
             }
         }
     }
@@ -85,7 +97,6 @@ impl PulseApp {
     /// Settings card with the "Open at login" switch.
     pub(super) fn login_section(&mut self, ui: &mut egui::Ui) {
         self.login_refresh();
-        ui.ctx().request_repaint_after(Duration::from_secs(2));
         let status = self.login.status.clone();
         let mut on = status.is_on();
         let mut toggled = false;
@@ -101,9 +112,6 @@ impl PulseApp {
                     LoginStatus::Unbundled => {
                         ui.label(RichText::new(self.i18n.t("login.unbundled")).small().weak());
                     }
-                    LoginStatus::Unsupported => {
-                        ui.label(RichText::new(self.i18n.t("login.unsupported")).small().weak());
-                    }
                     _ => {}
                 }
             });
@@ -112,7 +120,12 @@ impl PulseApp {
             }
         });
         if toggled {
-            self.login_set(on);
+            if status == LoginStatus::RequiresApproval {
+                // register() would fail with "launch denied by user": send them to System Settings.
+                login_item::open_system_settings();
+            } else {
+                self.login_set(on);
+            }
         }
         if open_settings {
             login_item::open_system_settings();

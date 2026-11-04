@@ -101,15 +101,20 @@ pub fn system_language() -> String {
     static S: OnceLock<String> = OnceLock::new();
     S.get_or_init(|| {
         #[cfg(target_os = "macos")]
-        if let Ok(out) = std::process::Command::new("defaults").args(["read", "-g", "AppleLanguages"]).output() {
-            let s = String::from_utf8_lossy(&out.stdout);
-            if let Some(first) = s.split('"').nth(1) {
-                return first.to_string();
-            }
+        if let Ok(out) = std::process::Command::new("defaults").args(["read", "-g", "AppleLanguages"]).output()
+            && let Some(first) = first_language(&String::from_utf8_lossy(&out.stdout))
+        {
+            return first.to_string();
         }
         std::env::var("LANG").ok().and_then(|l| l.split('.').next().map(str::to_string)).unwrap_or_else(|| "en".into())
     })
     .clone()
+}
+
+/// The first language in the old-style plist `defaults read -g AppleLanguages` prints.
+/// `defaults` only quotes values that contain a dash, so `(en, "es-ES")` and `(es)` both occur.
+fn first_language(out: &str) -> Option<&str> {
+    out.lines().map(|l| l.trim().trim_end_matches(',').trim_matches('"')).find(|l| !l.is_empty() && *l != "(" && *l != ")")
 }
 
 /// "System" maps to Spanish when the system prefers `es-*`, English otherwise.
@@ -212,6 +217,28 @@ mod tests {
         assert_eq!(I18n::new(Some("zh-Hans-CN")).t("tab.memory"), "内存");
         assert_eq!(I18n::new(Some("xx")).t("peak"), "Peak");
         assert_eq!(I18n::new(Some("en")).t("missing.key"), "missing.key");
+    }
+
+    #[test]
+    fn first_language_parses_defaults_output() {
+        // Multi-line, as `defaults read -g AppleLanguages` prints it.
+        assert_eq!(first_language("(\n    en,\n    \"es-ES\"\n)\n"), Some("en"));
+        assert_eq!(first_language("(\n    \"es-ES\",\n    en\n)\n"), Some("es-ES"));
+        assert_eq!(first_language("(\n    es\n)\n"), Some("es"));
+        assert_eq!(first_language("(\n)\n"), None);
+        assert_eq!(first_language(""), None);
+    }
+
+    /// Every non-blank, non-comment line of every locale file must parse (a line such as
+    /// `key = "x" # note` is otherwise dropped silently), and no key may appear twice.
+    #[test]
+    fn every_locale_line_parses_without_duplicates() {
+        for (i, src) in SOURCES.iter().enumerate() {
+            let lines = src.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')).count();
+            let rows = parse(src);
+            assert_eq!(rows.len(), lines, "{}.toml has a malformed line (expected `key = \"value\"`)", LANGS[i]);
+            assert_eq!(keys(i).len(), rows.len(), "{}.toml has duplicate keys", LANGS[i]);
+        }
     }
 
     #[test]

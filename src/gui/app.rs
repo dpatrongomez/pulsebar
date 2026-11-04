@@ -12,6 +12,7 @@ use eframe::egui::{self, Align, Color32, Rect, RichText, Vec2};
 
 use super::dialog::{self, Dialog, DialogIcon};
 use super::icons::Icons;
+use super::shortcuts::{self, ListEffect, Row, Shortcut};
 use super::loc;
 use super::widgets::{self, ActionIcon, Palette};
 use super::{Nav, show_app};
@@ -124,7 +125,14 @@ pub struct PulseApp {
     i18n: I18n,
     tab: Tab,
     highlight: Option<String>,
+    /// Selected process row inside the highlighted app (keyboard / click selection).
+    sel_proc: Option<i32>,
     scroll_to_highlight: bool,
+    scroll_to_sel: bool,
+    /// Rows of the app list as drawn last frame, for ↑ ↓ → ←.
+    list_rows: Vec<Row>,
+    /// A text field had focus at the end of the last frame: shortcuts stay out of its way.
+    text_focus: bool,
     inspector: Option<InspectorState>,
     confirm: Option<Plan>,
     pending: Vec<PendingRequest>,
@@ -137,10 +145,16 @@ pub struct PulseApp {
     last_nav_poll: Instant,
     expanded: HashMap<String, bool>,
     frozen: Option<FrozenOrder>,
+    /// Last ↑ ↓ → ← use: the list order stays frozen for a few seconds after it, even with the
+    /// pointer elsewhere.
+    last_key_nav: Option<Instant>,
     started: Option<Instant>,
     screenshot_requested: bool,
     series_cache: HashMap<String, (Instant, Vec<f64>)>,
 }
+
+/// How long the app list keeps its order after the last keyboard navigation.
+const KEY_NAV_FREEZE: Duration = Duration::from_secs(5);
 
 fn local_midnight() -> i64 {
     let now = chrono::Local::now();
@@ -155,6 +169,10 @@ impl PulseApp {
             tab,
             scroll_to_highlight: app_key.is_some(),
             highlight: app_key,
+            sel_proc: None,
+            scroll_to_sel: false,
+            list_rows: vec![],
+            text_focus: false,
             inspector: None,
             confirm: None,
             pending: vec![],
@@ -167,6 +185,7 @@ impl PulseApp {
             last_nav_poll: Instant::now(),
             expanded: HashMap::new(),
             frozen: None,
+            last_key_nav: None,
             started: None,
             screenshot_requested: false,
             series_cache: HashMap::new(),
@@ -270,7 +289,108 @@ impl PulseApp {
             self.tab = nav.tab;
             self.scroll_to_highlight = nav.app.is_some();
             self.highlight = nav.app;
+            self.sel_proc = None;
             show_app();
+        }
+    }
+
+
+    /// Selects a row of the app list and scrolls it into view.
+    fn select_row(&mut self, row: &Row) {
+        match row {
+            Row::App(k) => {
+                self.highlight = Some(k.clone());
+                self.sel_proc = None;
+            }
+            Row::Proc { app, pid } => {
+                self.highlight = Some(app.clone());
+                self.sel_proc = Some(*pid);
+            }
+        }
+        self.scroll_to_sel = true;
+        self.last_key_nav = Some(Instant::now());
+    }
+
+    /// Keyboard navigation happened recently enough to keep the rows where they are.
+    fn key_nav_active(&self) -> bool {
+        self.last_key_nav.is_some_and(|t| t.elapsed() < KEY_NAV_FREEZE)
+    }
+
+    fn selected_row(&self) -> Option<Row> {
+        let app = self.highlight.clone()?;
+        Some(match self.sel_proc {
+            Some(pid) => Row::Proc { app, pid },
+            None => Row::App(app),
+        })
+    }
+
+    fn go_tab(&mut self, tab: Tab) {
+        self.tab = tab;
+        self.highlight = None;
+        self.sel_proc = None;
+    }
+
+    /// Window-wide keyboard shortcuts. They stay silent while a text field has focus, and under
+    /// a modal dialog only ⌘W works.
+    fn handle_shortcuts(&mut self, ctx: &egui::Context, snap: &Arc<Snapshot>) {
+        if self.text_focus {
+            return;
+        }
+        let modal = self.confirm.is_some() || !self.pending.is_empty();
+        let widget_focused = ctx.wants_keyboard_input();
+        let events = ctx.input(|i| i.events.clone());
+        for e in events {
+            let egui::Event::Key { key, pressed: true, repeat, modifiers, .. } = e else { continue };
+            let Some(sc) = shortcuts::map(key, modifiers) else { continue };
+            if !shortcuts::allowed(sc, repeat, modal, widget_focused) {
+                continue;
+            }
+            let visible: Vec<Tab> = self.settings.tabs.iter().filter(|t| t.visible).map(|t| t.tab).collect();
+            match sc {
+                Shortcut::TabNumber(n) => {
+                    let Some(t) = shortcuts::tab_by_number(&visible, n) else { continue };
+                    self.go_tab(t);
+                }
+                Shortcut::PrevTab | Shortcut::NextTab => {
+                    let Some(t) = shortcuts::cycle_tab(&visible, self.tab, if sc == Shortcut::NextTab { 1 } else { -1 }) else { continue };
+                    self.go_tab(t);
+                }
+                Shortcut::OpenSettings => self.go_tab(Tab::Settings),
+                Shortcut::CloseWindow => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
+                Shortcut::Up | Shortcut::Down | Shortcut::Expand | Shortcut::Collapse => {
+                    let expanded = &self.expanded;
+                    let effect = shortcuts::list_effect(sc, &self.list_rows, self.selected_row().as_ref(), &|k| expanded.get(k).copied().unwrap_or(false));
+                    match effect {
+                        ListEffect::Select(r) => self.select_row(&r),
+                        ListEffect::SetExpanded(k, open) => {
+                            self.expanded.insert(k, open);
+                            self.last_key_nav = Some(Instant::now());
+                        }
+                        ListEffect::Nothing => continue,
+                    }
+                }
+                Shortcut::Inspect | Shortcut::Quit | Shortcut::ForceQuit => {
+                    let Some(row) = self.selected_row().filter(|r| self.list_rows.contains(r)) else { continue };
+                    let mode = if sc == Shortcut::ForceQuit { Mode::ForceQuit } else { Mode::Quit };
+                    match (sc, row) {
+                        // Force Quit is for apps only: the mouse offers no Force Quit on a process
+                        // row, and the System group would otherwise be reachable with SIGKILL.
+                        (Shortcut::ForceQuit, Row::Proc { .. }) => continue,
+                        (Shortcut::Inspect, Row::Proc { pid, .. }) => self.open_inspector(snap, pid),
+                        (Shortcut::Inspect, Row::App(k)) => {
+                            // An app has no single process: inspect its biggest one.
+                            let pid = snap.apps.iter().find(|a| a.key == k).and_then(|a| a.pids.iter().filter_map(|p| snap.process(*p)).max_by_key(|p| p.mem_bytes).map(|p| p.pid).or(Some(a.root_pid)));
+                            if let Some(pid) = pid {
+                                self.open_inspector(snap, pid);
+                            }
+                        }
+                        (_, Row::Proc { pid, .. }) => self.ask(snap, Target::Pid(pid), mode),
+                        (_, Row::App(k)) => self.ask(snap, Target::App(k), mode),
+                    }
+                }
+            }
+            // Handled: keep egui's own focus navigation and text handling from seeing the key.
+            ctx.input_mut(|i| i.consume_key(modifiers, key));
         }
     }
 
@@ -1033,6 +1153,17 @@ impl PulseApp {
             }
             ui.label(RichText::new(i18n.t("set.plans_note")).small().weak());
         });
+        Self::section(ui, &self.i18n.t("kbd.title"), "", |ui| {
+            egui::Grid::new("shortcuts").num_columns(2).spacing([24.0, 6.0]).show(ui, |ui| {
+                for (keys, what) in shortcuts::HELP {
+                    ui.label(RichText::new(*keys).monospace().strong());
+                    ui.label(self.i18n.t(what));
+                    ui.end_row();
+                }
+            });
+            ui.add_space(4.0);
+            ui.label(RichText::new(self.i18n.t("kbd.note")).small().weak());
+        });
         let mut copy = None;
         Self::section(ui, &i18n.t("set.mcp"), "", |ui| {
             changed |= ui.checkbox(&mut s.mcp_enabled, i18n.t("set.mcp_enable")).changed();
@@ -1282,6 +1413,10 @@ impl eframe::App for PulseApp {
             return;
         };
 
+        self.handle_shortcuts(ctx, &snap);
+        // The list on screen refills this while it is drawn.
+        self.list_rows.clear();
+
         self.sidebar(ctx, &snap);
         if !self.toasts.is_empty() {
             egui::TopBottomPanel::bottom("toasts").show(ctx, |ui| {
@@ -1312,5 +1447,7 @@ impl eframe::App for PulseApp {
             });
         });
         self.dialogs(ctx, &snap);
+        self.scroll_to_sel = false;
+        self.text_focus = ctx.output(|o| o.ime.is_some());
     }
 }

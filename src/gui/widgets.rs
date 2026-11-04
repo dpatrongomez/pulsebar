@@ -46,18 +46,19 @@ pub fn num(settings: &Settings, s: impl Into<String>, size: f32) -> RichText {
 
 /// Line chart with min/max band for history buckets: (t, min, avg, max). The time axis spans
 /// the first to the last point and the line is continuous.
-pub fn history_chart(ui: &mut egui::Ui, pts: &[(i64, f64, f64, f64)], height: f32, color: Color32, fmt: &dyn Fn(f64) -> String) {
+pub fn history_chart(ui: &mut egui::Ui, i18n: &crate::i18n::I18n, pts: &[(i64, f64, f64, f64)], height: f32, color: Color32, fmt: &dyn Fn(f64) -> String) {
     let range = match (pts.first(), pts.last()) {
         (Some(a), Some(b)) => (a.0, b.0),
         _ => (0, 1),
     };
-    history_chart_range(ui, pts, range, 0, height, color, fmt);
+    history_chart_range(ui, i18n, pts, range, 0, height, color, fmt);
 }
 
 /// Like [`history_chart`], but the x axis covers `range` = (from, to) in seconds whatever data
 /// there is, so partial history looks partial. With `step_s > 0` the line is broken wherever two
 /// consecutive points are more than 1.5 steps apart (a gap with no data).
-pub fn history_chart_range(ui: &mut egui::Ui, pts: &[(i64, f64, f64, f64)], range: (i64, i64), step_s: i64, height: f32, color: Color32, fmt: &dyn Fn(f64) -> String) {
+#[allow(clippy::too_many_arguments)]
+pub fn history_chart_range(ui: &mut egui::Ui, i18n: &crate::i18n::I18n, pts: &[(i64, f64, f64, f64)], range: (i64, i64), step_s: i64, height: f32, color: Color32, fmt: &dyn Fn(f64) -> String) {
     let width = ui.available_width();
     let (resp, painter) = ui.allocate_painter(Vec2::new(width, height), Sense::hover());
     // Charts scrolled out of view cost nothing.
@@ -67,7 +68,7 @@ pub fn history_chart_range(ui: &mut egui::Ui, pts: &[(i64, f64, f64, f64)], rang
     let r = resp.rect.shrink2(Vec2::new(4.0, 8.0));
     painter.rect_stroke(resp.rect, 6.0, Stroke::new(1.0, ui.visuals().widgets.noninteractive.bg_stroke.color), egui::StrokeKind::Inside);
     if pts.len() < 2 {
-        painter.text(r.center(), egui::Align2::CENTER_CENTER, "Not enough history yet", egui::FontId::proportional(14.0), ui.visuals().weak_text_color());
+        painter.text(r.center(), egui::Align2::CENTER_CENTER, i18n.t("hist.not_enough"), egui::FontId::proportional(14.0), ui.visuals().weak_text_color());
         return;
     }
     let (t0, t1) = (range.0 as f64, range.1 as f64);
@@ -103,8 +104,8 @@ pub fn history_chart_range(ui: &mut egui::Ui, pts: &[(i64, f64, f64, f64)], rang
         if let Some(p) = pts.iter().min_by_key(|p| ((p.0 as f64 - t).abs()) as i64) {
             let x = map(p.0, 0.0).x;
             painter.line_segment([Pos2::new(x, r.top()), Pos2::new(x, r.bottom())], Stroke::new(1.0, ui.visuals().weak_text_color()));
-            let when = chrono::DateTime::from_timestamp(p.0, 0).map(|d| d.with_timezone(&chrono::Local).format("%b %d %H:%M").to_string()).unwrap_or_default();
-            resp.on_hover_text(format!("{when}\navg {}  min {}  max {}", fmt(p.2), fmt(p.1), fmt(p.3)));
+            let when = chrono::DateTime::from_timestamp(p.0, 0).map(|d| d.with_timezone(&chrono::Local).format(&i18n.t("hist.date_fmt")).to_string()).unwrap_or_default();
+            resp.on_hover_text(format!("{when}\n{}", i18n.tf("hist.tip", &[("avg", &fmt(p.2)), ("min", &fmt(p.1)), ("max", &fmt(p.3))])));
         }
     }
 }
@@ -258,13 +259,13 @@ pub fn donut(ui: &mut egui::Ui, diameter: f32, parts: &[(f64, Color32)], big: &s
 }
 
 /// Area chart for the hero cards: faint horizontal grid, gradient fill, 2 px line.
-pub fn area_chart(p: &egui::Painter, r: Rect, values: &[f64], color: Color32, max: Option<f64>, grid: Color32) {
+pub fn area_chart(p: &egui::Painter, r: Rect, values: &[f64], color: Color32, max: Option<f64>, grid: Color32, empty: &str) {
     for i in 0..4 {
         let y = r.top() + r.height() * i as f32 / 3.0;
         p.line_segment([Pos2::new(r.left(), y), Pos2::new(r.right(), y)], Stroke::new(1.0, grid.gamma_multiply(0.25)));
     }
     if values.len() < 2 {
-        p.text(r.center(), egui::Align2::CENTER_CENTER, "Collecting data…", egui::FontId::proportional(13.0), grid);
+        p.text(r.center(), egui::Align2::CENTER_CENTER, empty, egui::FontId::proportional(13.0), grid);
         return;
     }
     let hi = max.unwrap_or_else(|| values.iter().cloned().fold(0.0, f64::max) * 1.15).max(1e-9);

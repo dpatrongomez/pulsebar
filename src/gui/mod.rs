@@ -5,6 +5,8 @@
 mod app;
 mod dialog;
 mod icons;
+mod shortcuts;
+mod loc;
 pub mod tray;
 mod widgets;
 

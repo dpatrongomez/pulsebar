@@ -12,19 +12,23 @@ use eframe::egui::{self, Align, Color32, Rect, RichText, Vec2};
 
 use super::dialog::{self, Dialog, DialogIcon};
 use super::icons::Icons;
+use super::shortcuts::{self, ListEffect, Row, Shortcut};
+use super::loc;
 use super::widgets::{self, ActionIcon, Palette};
 use super::{Nav, show_app};
 use crate::actions::{self, HumanYes, Mode, PendingRequest, Plan, Target};
 use crate::daemon::Shared;
 use crate::history::RankRow;
-use crate::i18n::{I18n, LANGS};
+use crate::i18n::{COMPLETE, I18n, PARTIAL};
 use crate::inspector::{self, ProcessDetail};
 use crate::model::*;
 use crate::settings::{MenuDisplay, NumberFont, PlanConfig, Retention, Settings, Tab, Theme};
-use crate::units::{CpuUnit, DataUnit, TempUnit, format_duration};
-use crate::{docker, limits, output, paths, projects, share_card, sys};
+use crate::sorting::{self, FrozenOrder, SortKey, SortSpec};
+use crate::units::{CpuUnit, DataUnit, TempUnit, Units, format_duration};
+use crate::{docker, output, paths, projects, share_card, sys};
 
 mod detail;
+mod sidebar;
 mod tabs;
 
 struct Stat {
@@ -99,9 +103,9 @@ fn tab_glyph(t: Tab) -> &'static str {
     }
 }
 
-/// Watts as "427 mW" below 1 W, else "1.7 W".
-fn format_power(w: f64) -> String {
-    if w < 1.0 { format!("{:.0} mW", w * 1000.0) } else { format!("{w:.1} W") }
+/// Watts as "427 mW" below 1 W, else "1.7 W" ("1,7 W" in Spanish).
+fn format_power(i18n: &I18n, w: f64) -> String {
+    if w < 1.0 { format!("{:.0} mW", w * 1000.0) } else { i18n.num(format!("{w:.1} W")) }
 }
 
 struct InspectorState {
@@ -122,7 +126,14 @@ pub struct PulseApp {
     i18n: I18n,
     tab: Tab,
     highlight: Option<String>,
+    /// Selected process row inside the highlighted app (keyboard / click selection).
+    sel_proc: Option<i32>,
     scroll_to_highlight: bool,
+    scroll_to_sel: bool,
+    /// Rows of the app list as drawn last frame, for ↑ ↓ → ←.
+    list_rows: Vec<Row>,
+    /// A text field had focus at the end of the last frame: shortcuts stay out of its way.
+    text_focus: bool,
     inspector: Option<InspectorState>,
     detail: Option<detail::AppDetailState>,
     confirm: Option<Plan>,
@@ -136,19 +147,20 @@ pub struct PulseApp {
     last_nav_poll: Instant,
     expanded: HashMap<String, bool>,
     frozen: Option<FrozenOrder>,
+    /// Last ↑ ↓ → ← use: the list order stays frozen for a few seconds after it, even with the
+    /// pointer elsewhere.
+    last_key_nav: Option<Instant>,
     started: Option<Instant>,
     screenshot_requested: bool,
     series_cache: HashMap<String, (Instant, Vec<f64>)>,
+    /// Search query per tab (kept while the window is open).
+    search: HashMap<Tab, String>,
+    /// Set by ⌘F; the visible app list's search field takes focus on the next paint.
+    focus_search: bool,
 }
 
-/// Row order of the app list while the pointer is over it. Without this a refresh can re-rank
-/// the list between hover and click and slide another app's Quit button under the cursor
-/// (egui identifies those buttons by position).
-struct FrozenOrder {
-    metric: RankMetric,
-    apps: Vec<String>,
-    procs: HashMap<String, Vec<i32>>,
-}
+/// How long the app list keeps its order after the last keyboard navigation.
+const KEY_NAV_FREEZE: Duration = Duration::from_secs(5);
 
 fn local_midnight() -> i64 {
     let now = chrono::Local::now();
@@ -163,6 +175,10 @@ impl PulseApp {
             tab,
             scroll_to_highlight: app_key.is_some(),
             highlight: app_key,
+            sel_proc: None,
+            scroll_to_sel: false,
+            list_rows: vec![],
+            text_focus: false,
             inspector: None,
             detail: None,
             confirm: None,
@@ -176,9 +192,12 @@ impl PulseApp {
             last_nav_poll: Instant::now(),
             expanded: HashMap::new(),
             frozen: None,
+            last_key_nav: None,
             started: None,
             screenshot_requested: false,
             series_cache: HashMap::new(),
+            search: HashMap::new(),
+            focus_search: false,
             shared,
             settings,
         };
@@ -209,7 +228,25 @@ impl PulseApp {
         let _ = self.settings.save();
         *self.shared.settings.write().unwrap() = self.settings.clone();
         self.i18n = I18n::new(self.settings.language.as_deref());
+        // Everything the window shows is rebuilt from `self.i18n` every frame, so a language
+        // change is live as soon as the settings are saved; the menu bar agent reloads
+        // settings.json on its own.
+        ctx.request_repaint();
         self.apply_style(ctx);
+    }
+
+    /// The units setting plus the language's decimal sign. Use this instead of `settings.units`
+    /// for anything that is displayed.
+    fn units(&self) -> Units {
+        Units { decimal_comma: self.i18n.decimal_comma(), ..self.settings.units }
+    }
+
+    fn t(&self, key: &str) -> String {
+        self.i18n.t(key)
+    }
+
+    fn tf(&self, key: &str, args: &[(&str, &str)]) -> String {
+        self.i18n.tf(key, args)
     }
 
     fn pal(&self, ctx: &egui::Context) -> Palette {
@@ -223,7 +260,10 @@ impl PulseApp {
     fn ask(&mut self, snap: &Snapshot, target: Target, mode: Mode) {
         match actions::plan(snap, target, mode) {
             Ok(p) => self.confirm = Some(p),
-            Err(e) => self.toast(e.to_string()),
+            Err(e) => {
+                let m = loc::error_text(&self.i18n, &e);
+                self.toast(m)
+            }
         }
     }
 
@@ -248,6 +288,11 @@ impl PulseApp {
         self.inspector = Some(InspectorState { detail: inspector::inspect(snap, pid, false), rx: Some(rx) });
     }
 
+    /// A confirmation or MCP approval dialog is showing.
+    fn dialog_open(&self) -> bool {
+        self.confirm.is_some() || !self.pending.is_empty()
+    }
+
     /// Navigation requests from the menu bar agent (nav.json).
     fn handle_nav(&mut self) {
         if self.last_nav_poll.elapsed() < Duration::from_millis(300) {
@@ -259,8 +304,113 @@ impl PulseApp {
             self.nav_seen = nav.at_ms;
             self.tab = nav.tab;
             self.scroll_to_highlight = nav.app.is_some();
+            // A search on the target tab could hide the app being opened.
+            if nav.app.is_some() {
+                self.search.remove(&nav.tab);
+            }
             self.highlight = nav.app;
+            self.sel_proc = None;
             show_app();
+        }
+    }
+
+
+    /// Selects a row of the app list and scrolls it into view.
+    fn select_row(&mut self, row: &Row) {
+        match row {
+            Row::App(k) => {
+                self.highlight = Some(k.clone());
+                self.sel_proc = None;
+            }
+            Row::Proc { app, pid } => {
+                self.highlight = Some(app.clone());
+                self.sel_proc = Some(*pid);
+            }
+        }
+        self.scroll_to_sel = true;
+        self.last_key_nav = Some(Instant::now());
+    }
+
+    /// Keyboard navigation happened recently enough to keep the rows where they are.
+    fn key_nav_active(&self) -> bool {
+        self.last_key_nav.is_some_and(|t| t.elapsed() < KEY_NAV_FREEZE)
+    }
+
+    fn selected_row(&self) -> Option<Row> {
+        let app = self.highlight.clone()?;
+        Some(match self.sel_proc {
+            Some(pid) => Row::Proc { app, pid },
+            None => Row::App(app),
+        })
+    }
+
+    fn go_tab(&mut self, tab: Tab) {
+        self.tab = tab;
+        self.highlight = None;
+        self.sel_proc = None;
+    }
+
+    /// Window-wide keyboard shortcuts. They stay silent while a text field has focus, and under
+    /// a modal dialog only ⌘W works.
+    fn handle_shortcuts(&mut self, ctx: &egui::Context, snap: &Arc<Snapshot>) {
+        if self.text_focus {
+            return;
+        }
+        let modal = self.confirm.is_some() || !self.pending.is_empty();
+        let widget_focused = ctx.wants_keyboard_input();
+        let events = ctx.input(|i| i.events.clone());
+        for e in events {
+            let egui::Event::Key { key, pressed: true, repeat, modifiers, .. } = e else { continue };
+            let Some(sc) = shortcuts::map(key, modifiers) else { continue };
+            if !shortcuts::allowed(sc, repeat, modal, widget_focused) {
+                continue;
+            }
+            let visible: Vec<Tab> = self.settings.tabs.iter().filter(|t| t.visible).map(|t| t.tab).collect();
+            match sc {
+                Shortcut::TabNumber(n) => {
+                    let Some(t) = shortcuts::tab_by_number(&visible, n) else { continue };
+                    self.go_tab(t);
+                }
+                Shortcut::PrevTab | Shortcut::NextTab => {
+                    let Some(t) = shortcuts::cycle_tab(&visible, self.tab, if sc == Shortcut::NextTab { 1 } else { -1 }) else { continue };
+                    self.go_tab(t);
+                }
+                Shortcut::OpenSettings => self.go_tab(Tab::Settings),
+                Shortcut::CloseWindow => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
+                Shortcut::Up | Shortcut::Down | Shortcut::Expand | Shortcut::Collapse => {
+                    let expanded = &self.expanded;
+                    let effect = shortcuts::list_effect(sc, &self.list_rows, self.selected_row().as_ref(), &|k| expanded.get(k).copied().unwrap_or(false));
+                    match effect {
+                        ListEffect::Select(r) => self.select_row(&r),
+                        ListEffect::SetExpanded(k, open) => {
+                            self.expanded.insert(k, open);
+                            self.last_key_nav = Some(Instant::now());
+                        }
+                        ListEffect::Nothing => continue,
+                    }
+                }
+                Shortcut::Inspect | Shortcut::Quit | Shortcut::ForceQuit => {
+                    let Some(row) = self.selected_row().filter(|r| self.list_rows.contains(r)) else { continue };
+                    let mode = if sc == Shortcut::ForceQuit { Mode::ForceQuit } else { Mode::Quit };
+                    match (sc, row) {
+                        // Force Quit is for apps only: the mouse offers no Force Quit on a process
+                        // row, and the System group would otherwise be reachable with SIGKILL.
+                        (Shortcut::ForceQuit, Row::Proc { .. }) => continue,
+                        (Shortcut::Inspect, Row::Proc { pid, .. }) => self.open_inspector(snap, pid),
+                        (Shortcut::Inspect, Row::App(k)) => {
+                            // An app has no single process: inspect its biggest one.
+                            let pid = snap.apps.iter().find(|a| a.key == k).and_then(|a| a.pids.iter().filter_map(|p| snap.process(*p)).max_by_key(|p| p.mem_bytes).map(|p| p.pid).or(Some(a.root_pid)));
+                            if let Some(pid) = pid {
+                                self.open_inspector(snap, pid);
+                            }
+                        }
+                        (_, Row::Proc { pid, .. }) => self.ask(snap, Target::Pid(pid), mode),
+                        (_, Row::App(k)) => self.ask(snap, Target::App(k), mode),
+                    }
+                }
+            }
+            // Handled: keep egui's own focus navigation and text handling from seeing the key.
+            ctx.input_mut(|i| i.consume_key(modifiers, key));
         }
     }
 
@@ -272,8 +422,14 @@ impl PulseApp {
     // Tabs
     // ------------------------------------------------------------------------------------------
 
+    /// How many cards per row fit in `avail` (at least `min_w` wide, at most `max_cols`) and their width.
+    fn grid(avail: f32, gap: f32, min_w: f32, max_cols: usize) -> (usize, f32) {
+        let cols = (((avail + gap) / (min_w + gap)) as usize).clamp(1, max_cols);
+        (cols, ((avail - gap * (cols - 1) as f32) / cols as f32).floor().max(1.0))
+    }
+
     fn overview(&mut self, ui: &mut egui::Ui, snap: &Arc<Snapshot>) {
-        let u = self.settings.units;
+        let u = self.units();
         let m = &snap.machine;
         let sparks = self.shared.sparks.read().unwrap().clone();
         let dark = ui.visuals().dark_mode;
@@ -285,7 +441,9 @@ impl PulseApp {
         let i18n = self.i18n.clone();
         let t = |k: &str| i18n.t(k);
         let dash = || "—".to_string();
-        let stat = |label: &str, value: String| Stat { label: label.to_string(), value, dot: None };
+        // `key` is an i18n key.
+        let stat = |key: &str, value: String| Stat { label: i18n.t(key), value, dot: None };
+        let pw = |w: f64| i18n.num(format!("{w:.1} W"));
 
         let cpu_today = self.today_stats("cpu");
         let gpu_today = self.today_stats("gpu");
@@ -299,11 +457,11 @@ impl PulseApp {
         let mem = &m.memory;
         let used_frac = mem.used as f64 / mem.total.max(1) as f64;
         let (pressure, pressure_color) = if mem.swap_used > mem.total / 8 || used_frac > 0.95 {
-            ("High", pal.danger)
+            (t("pressure.high"), pal.danger)
         } else if mem.swap_used > 0 && used_frac > 0.85 {
-            ("Elevated", pal.warn)
+            (t("pressure.elevated"), pal.warn)
         } else {
-            ("Normal", col(MetricKind::Battery))
+            (t("pressure.normal"), col(MetricKind::Battery))
         };
         let (mem_app_c, mem_wired_c, mem_comp_c) = (col(MetricKind::Cpu), col(MetricKind::Sound), col(MetricKind::Network));
 
@@ -318,9 +476,9 @@ impl PulseApp {
                 value: u.cpu(m.cpu.total_pct, m.cpu.core_count),
                 badge: None,
                 stats: vec![
-                    stat("User", u.cpu(m.cpu.user_pct, m.cpu.core_count)),
-                    stat("System", u.cpu(m.cpu.system_pct, m.cpu.core_count)),
-                    stat(&t("avg_today"), cpu_today.map(|s| u.cpu(s.0, m.cpu.core_count)).unwrap_or_else(dash)),
+                    stat("st.user", u.cpu(m.cpu.user_pct, m.cpu.core_count)),
+                    stat("st.system", u.cpu(m.cpu.system_pct, m.cpu.core_count)),
+                    stat("avg_today", cpu_today.map(|s| u.cpu(s.0, m.cpu.core_count)).unwrap_or_else(dash)),
                 ],
                 footer: Footer::Bars(sparks.get(MetricKind::Cpu), Some(100.0)),
             },
@@ -328,13 +486,13 @@ impl PulseApp {
                 tab: Tab::Memory,
                 kind: MetricKind::Memory,
                 title: t("tab.memory"),
-                caption: format!("In Use of {}", u.bytes(mem.total)),
+                caption: self.tf("in_use_of", &[("total", &u.bytes(mem.total))]),
                 value: u.bytes(mem.used),
-                badge: Some((pressure.to_string(), pressure_color)),
+                badge: Some((pressure, pressure_color)),
                 stats: vec![
-                    Stat { label: "App".into(), value: u.bytes(mem.app), dot: Some(mem_app_c) },
-                    Stat { label: "Wired".into(), value: u.bytes(mem.wired), dot: Some(mem_wired_c) },
-                    Stat { label: "Compressed".into(), value: u.bytes(mem.compressed), dot: Some(mem_comp_c) },
+                    Stat { label: t("mem.app"), value: u.bytes(mem.app), dot: Some(mem_app_c) },
+                    Stat { label: t("mem.wired"), value: u.bytes(mem.wired), dot: Some(mem_wired_c) },
+                    Stat { label: t("mem.compressed"), value: u.bytes(mem.compressed), dot: Some(mem_comp_c) },
                 ],
                 footer: Footer::Bars(sparks.get(MetricKind::Memory), Some(mem.total as f64)),
             },
@@ -346,9 +504,9 @@ impl PulseApp {
                 value: format!("{:.0} %", m.gpu.utilization_pct),
                 badge: None,
                 stats: vec![
-                    stat("Memory", if m.gpu.vram_used > 0 { u.bytes(m.gpu.vram_used) } else { dash() }),
-                    stat("Average", gpu_today.map(|s| format!("{:.0}%", s.0)).unwrap_or_else(dash)),
-                    stat(&t("peak"), gpu_today.map(|s| format!("{:.0}%", s.1)).unwrap_or_else(dash)),
+                    stat("tab.memory", if m.gpu.vram_used > 0 { u.bytes(m.gpu.vram_used) } else { dash() }),
+                    stat("st.average", gpu_today.map(|s| format!("{:.0}%", s.0)).unwrap_or_else(dash)),
+                    stat("peak", gpu_today.map(|s| format!("{:.0}%", s.1)).unwrap_or_else(dash)),
                 ],
                 footer: Footer::Bars(sparks.get(MetricKind::Gpu), Some(100.0)),
             },
@@ -356,13 +514,13 @@ impl PulseApp {
                 tab: Tab::Disk,
                 kind: MetricKind::Disk,
                 title: t("tab.disk"),
-                caption: boot.map(|v| format!("Free of {}", u.bytes(v.total))).unwrap_or_else(|| "Free".into()),
+                caption: boot.map(|v| self.tf("free_of", &[("total", &u.bytes(v.total))])).unwrap_or_else(|| t("free")),
                 value: boot.map(|v| u.bytes(v.free)).unwrap_or_else(dash),
                 badge: None,
                 stats: vec![
-                    stat("Reading", u.rate(m.disk.read_bps)),
-                    stat("Writing", u.rate(m.disk.write_bps)),
-                    stat("Written Today", total_or_dash(written_today)),
+                    stat("st.reading", u.rate(m.disk.read_bps)),
+                    stat("st.writing", u.rate(m.disk.write_bps)),
+                    stat("st.written_today", total_or_dash(written_today)),
                 ],
                 footer: Footer::Bars(sparks.get(MetricKind::Disk), None),
             },
@@ -370,13 +528,13 @@ impl PulseApp {
                 tab: Tab::Network,
                 kind: MetricKind::Network,
                 title: t("tab.network"),
-                caption: "Downloading".into(),
+                caption: t("st.downloading"),
                 value: u.rate(m.network.rx_bps),
                 badge: None,
                 stats: vec![
-                    stat("Uploading", u.rate(m.network.tx_bps)),
-                    stat("Today", total_or_dash(net_today)),
-                    stat("Last 7 Days", total_or_dash(net_week)),
+                    stat("st.uploading", u.rate(m.network.tx_bps)),
+                    stat("st.today", total_or_dash(net_today)),
+                    stat("st.last_7d", total_or_dash(net_week)),
                 ],
                 footer: Footer::Bars(sparks.get(MetricKind::Network), None),
             },
@@ -385,13 +543,13 @@ impl PulseApp {
                     tab: Tab::Battery,
                     kind: MetricKind::Battery,
                     title: t("tab.battery"),
-                    caption: if battery.charging { "Charging" } else if battery.on_ac { "On Power Adapter" } else { "On Battery" }.into(),
+                    caption: t(if battery.charging { "battery.charging" } else if battery.on_ac { "battery.on_adapter" } else { "battery.on_battery" }),
                     value: format!("{:.0} %", battery.percent),
                     badge: None,
                     stats: vec![
-                        stat(if battery.charging { "Until Full" } else { "Remaining" }, battery.time_remaining_min.filter(|m| *m > 0).map(|m| format_duration(m * 60)).unwrap_or_else(dash)),
-                        stat("Power Draw", battery.power_w.map(f64::abs).or(m.power.system_w).map(|w| format!("{w:.1} W")).unwrap_or_else(dash)),
-                        stat("Health", battery.health_pct.map(|h| format!("{h:.0}%")).unwrap_or_else(dash)),
+                        stat(if battery.charging { "st.until_full" } else { "st.remaining" }, battery.time_remaining_min.filter(|m| *m > 0).map(|m| format_duration(m * 60)).unwrap_or_else(dash)),
+                        stat("st.power_draw", battery.power_w.map(f64::abs).or(m.power.system_w).map(pw).unwrap_or_else(dash)),
+                        stat("st.health", battery.health_pct.map(|h| format!("{h:.0}%")).unwrap_or_else(dash)),
                     ],
                     footer: Footer::Bars(sparks.get(MetricKind::Battery), Some(100.0)),
                 }
@@ -399,14 +557,14 @@ impl PulseApp {
                 CardSpec {
                     tab: Tab::Battery,
                     kind: MetricKind::Power,
-                    title: "Power".into(),
-                    caption: "System Power Draw".into(),
-                    value: m.power.system_w.map(|w| format!("{w:.1} W")).unwrap_or_else(dash),
+                    title: t("st.power"),
+                    caption: t("st.system_power_draw"),
+                    value: m.power.system_w.map(pw).unwrap_or_else(dash),
                     badge: None,
                     stats: vec![
-                        stat("CPU", m.power.cpu_w.map(|w| format!("{w:.1} W")).unwrap_or_else(dash)),
-                        stat("GPU", m.power.gpu_w.map(|w| format!("{w:.1} W")).unwrap_or_else(dash)),
-                        stat("Neural", m.power.ane_w.map(|w| format!("{w:.2} W")).unwrap_or_else(dash)),
+                        stat("tab.cpu", m.power.cpu_w.map(pw).unwrap_or_else(dash)),
+                        stat("tab.gpu", m.power.gpu_w.map(pw).unwrap_or_else(dash)),
+                        stat("tab.neural", m.power.ane_w.map(|w| i18n.num(format!("{w:.2} W"))).unwrap_or_else(dash)),
                     ],
                     footer: Footer::Bars(sparks.get(MetricKind::Power), None),
                 }
@@ -415,13 +573,13 @@ impl PulseApp {
                 tab: Tab::Neural,
                 kind: MetricKind::Neural,
                 title: "Neural Engine".into(),
-                caption: if m.neural.available { "Apple Neural Engine".into() } else { "Not available on this Mac".into() },
+                caption: if m.neural.available { "Apple Neural Engine".into() } else { t("not_available_mac") },
                 value: if m.neural.available { format!("{:.0} %", m.neural.utilization_pct) } else { dash() },
                 badge: None,
                 stats: vec![
-                    stat("Power", if m.neural.available { format!("{:.2} W", m.neural.power_w) } else { dash() }),
-                    stat("Average", ane_today.map(|s| format!("{:.0}%", s.0)).unwrap_or_else(dash)),
-                    stat(&t("peak"), ane_today.map(|s| format!("{:.0}%", s.1)).unwrap_or_else(dash)),
+                    stat("st.power", if m.neural.available { i18n.num(format!("{:.2} W", m.neural.power_w)) } else { dash() }),
+                    stat("st.average", ane_today.map(|s| format!("{:.0}%", s.0)).unwrap_or_else(dash)),
+                    stat("peak", ane_today.map(|s| format!("{:.0}%", s.1)).unwrap_or_else(dash)),
                 ],
                 footer: Footer::Bars(sparks.get(MetricKind::Neural), Some(100.0)),
             },
@@ -429,10 +587,10 @@ impl PulseApp {
         cards.push(self.agents_card(snap, now));
 
         let gap = 14.0;
-        let w4 = ((ui.available_width() - 3.0 * gap) / 4.0).floor().max(180.0);
         let card_h = 214.0;
+        let (cols4, w4) = Self::grid(ui.available_width(), gap, 180.0, 4);
         let mut go: Option<Tab> = None;
-        for row in cards.chunks(4) {
+        for row in cards.chunks(cols4) {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = gap;
                 for c in row {
@@ -445,38 +603,41 @@ impl PulseApp {
         }
 
         // Breakdown cards: memory by type, memory by app, power by app.
-        let w3 = ((ui.available_width() - 2.0 * gap) / 3.0).floor().max(240.0);
+        let (cols3, w3) = Self::grid(ui.available_width(), gap, 240.0, 3);
         let gray = if dark { Color32::from_gray(110) } else { Color32::from_gray(170) };
         let free_c = if dark { Color32::from_gray(60) } else { Color32::from_gray(215) };
         let by_type = Breakdown3 {
             tab: Tab::Memory,
             glyph: "☰",
-            title: "Memory by Type".into(),
+            title: t("memory_by_type"),
             color: col(MetricKind::Cpu),
             big: format!("{:.0}%", used_frac * 100.0),
-            small: "in use".into(),
+            small: t("in_use"),
             rows: vec![
-                LegendRow { name: "App".into(), value: u.bytes(mem.app), weight: mem.app as f64, color: mem_app_c, bundle: None },
-                LegendRow { name: "Wired".into(), value: u.bytes(mem.wired), weight: mem.wired as f64, color: mem_wired_c, bundle: None },
-                LegendRow { name: "Compressed".into(), value: u.bytes(mem.compressed), weight: mem.compressed as f64, color: mem_comp_c, bundle: None },
-                LegendRow { name: "Cached".into(), value: u.bytes(mem.cached), weight: mem.cached as f64, color: gray, bundle: None },
-                LegendRow { name: "Free".into(), value: u.bytes(mem.free), weight: mem.free as f64, color: free_c, bundle: None },
+                LegendRow { name: t("mem.app"), value: u.bytes(mem.app), weight: mem.app as f64, color: mem_app_c, bundle: None },
+                LegendRow { name: t("mem.wired"), value: u.bytes(mem.wired), weight: mem.wired as f64, color: mem_wired_c, bundle: None },
+                LegendRow { name: t("mem.compressed"), value: u.bytes(mem.compressed), weight: mem.compressed as f64, color: mem_comp_c, bundle: None },
+                LegendRow { name: t("mem.cached"), value: u.bytes(mem.cached), weight: mem.cached as f64, color: gray, bundle: None },
+                LegendRow { name: t("free"), value: u.bytes(mem.free), weight: mem.free as f64, color: free_c, bundle: None },
             ],
         };
         let mem_c = col(MetricKind::Memory);
-        let by_app = self.app_breakdown(snap, RankMetric::Memory, "Memory by App", "⊞", mem_c, Tab::Memory, &|v| u.bytes(v as u64), gray);
+        let by_app = self.app_breakdown(snap, RankMetric::Memory, "memory_by_app", "⊞", mem_c, Tab::Memory, &|v| u.bytes(v as u64), gray);
         let pow_c = col(MetricKind::Battery);
-        let by_power = self.app_breakdown(snap, RankMetric::Energy, "Power by App", "⚡", pow_c, Tab::Battery, &format_power, gray);
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = gap;
-            for b in [by_type, by_app, by_power] {
-                if self.breakdown_card(ui, Vec2::new(w3, 196.0), &b) {
-                    go = Some(b.tab);
+        let by_power = self.app_breakdown(snap, RankMetric::Energy, "power_by_app", "⚡", pow_c, Tab::Battery, &|w| format_power(&i18n, w), gray);
+        for row in [by_type, by_app, by_power].chunks(cols3) {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = gap;
+                for b in row {
+                    if self.breakdown_card(ui, Vec2::new(w3, 196.0), b) {
+                        go = Some(b.tab);
+                    }
                 }
-            }
-        });
+            });
+            ui.add_space(gap - ui.spacing().item_spacing.y);
+        }
 
-        if let Some(b) = projects::idle_banner(&snap.projects) {
+        if let Some(b) = loc::idle_banner(&self.i18n, &u, &snap.projects) {
             ui.add_space(10.0);
             if ui.add(egui::Button::new(RichText::new(format!("⚠ {b}")).color(pal.warn)).frame(false)).clicked() {
                 go = Some(Tab::Projects);
@@ -491,11 +652,7 @@ impl PulseApp {
     fn agents_card(&self, snap: &Snapshot, now: i64) -> CardSpec {
         let known: Vec<&AIPlan> = snap.plans.iter().filter(|p| p.pace_state != PaceState::Unknown).collect();
         let tightest = known.iter().copied().min_by(|a, b| (100.0 - a.used_pct).total_cmp(&(100.0 - b.used_pct)));
-        let window = |w: &str| match w {
-            "week" | "7d" => "This week".to_string(),
-            "5h" => "5h window".to_string(),
-            other => other.to_string(),
-        };
+        let window = |w: &str| loc::window_label(&self.i18n, w);
         let sessions = snap.agents.len().to_string();
         let meters = known
             .iter()
@@ -508,12 +665,12 @@ impl PulseApp {
                 kind: MetricKind::Bluetooth, // placeholder hue, replaced in metric_card
                 title: self.i18n.t("tab.agents"),
                 caption: [p.provider.as_str(), p.plan.as_str(), &window(&p.window)].iter().filter(|s| !s.is_empty()).cloned().collect::<Vec<_>>().join(" · "),
-                value: format!("{:.0}% left", (100.0 - p.used_pct).max(0.0)),
+                value: self.tf("pct_left", &[("v", &format!("{:.0}", (100.0 - p.used_pct).max(0.0)))]),
                 badge: None,
                 stats: vec![
-                    Stat { label: "Resets".into(), value: p.resets_at.map(|t| format_duration(t - now)).unwrap_or("—".into()), dot: None },
-                    Stat { label: "Sessions".into(), value: sessions, dot: None },
-                    Stat { label: "Pace".into(), value: if p.pace_text.is_empty() { "—".into() } else { p.pace_text.clone() }, dot: None },
+                    Stat { label: self.t("st.resets"), value: p.resets_at.map(|t| format_duration(t - now)).unwrap_or("—".into()), dot: None },
+                    Stat { label: self.t("st.sessions"), value: sessions, dot: None },
+                    Stat { label: self.t("st.pace"), value: if p.pace_text.is_empty() { "—".into() } else { loc::pace_text(&self.i18n, &p.pace_text) }, dot: None },
                 ],
                 footer: Footer::Plans(meters),
             },
@@ -521,13 +678,13 @@ impl PulseApp {
                 tab: Tab::Agents,
                 kind: MetricKind::Bluetooth,
                 title: self.i18n.t("tab.agents"),
-                caption: "No plan usage found".into(),
+                caption: self.t("no_plan_usage"),
                 value: "—".into(),
                 badge: None,
                 stats: vec![
-                    Stat { label: "Sessions".into(), value: sessions, dot: None },
-                    Stat { label: "Working".into(), value: snap.agents.iter().filter(|a| a.state == AgentState::Working).count().to_string(), dot: None },
-                    Stat { label: "Memory".into(), value: self.settings.units.bytes(snap.agents.iter().map(|a| a.mem_bytes).sum()), dot: None },
+                    Stat { label: self.t("st.sessions"), value: sessions, dot: None },
+                    Stat { label: self.t("st.working"), value: snap.agents.iter().filter(|a| a.state == AgentState::Working).count().to_string(), dot: None },
+                    Stat { label: self.t("tab.memory"), value: self.units().bytes(snap.agents.iter().map(|a| a.mem_bytes).sum()), dot: None },
                 ],
                 footer: Footer::Plans(vec![]),
             },
@@ -546,8 +703,8 @@ impl PulseApp {
             .map(|(i, a)| LegendRow { name: a.app.name.clone(), value: fmt(a.metric(m)), weight: a.metric(m), color: color.gamma_multiply(shades[i]), bundle: a.app.bundle_path.clone() })
             .collect();
         let other = (total - rows.iter().map(|r| r.weight).sum::<f64>()).max(0.0);
-        rows.push(LegendRow { name: "Other".into(), value: fmt(other), weight: other, color: other_c, bundle: None });
-        Breakdown3 { tab, glyph, title: title.into(), color, big: fmt(total), small: "all apps".into(), rows }
+        rows.push(LegendRow { name: self.t("other"), value: fmt(other), weight: other, color: other_c, bundle: None });
+        Breakdown3 { tab, glyph, title: self.t(title), color, big: fmt(total), small: self.t("all_apps"), rows }
     }
 
     fn card_frame(ui: &mut egui::Ui, size: Vec2) -> (egui::Response, Rect) {
@@ -699,16 +856,17 @@ impl PulseApp {
     }
 
     fn history_tab(&mut self, ui: &mut egui::Ui) {
-        let u = self.settings.units;
+        let u = self.units();
         let pal = self.pal(ui.ctx());
+        let i18n = self.i18n.clone();
         ui.horizontal(|ui| {
-            egui::ComboBox::from_id_salt("hmetric").selected_text(&self.history_ui.metric).show_ui(ui, |ui| {
+            egui::ComboBox::from_id_salt("hmetric").selected_text(i18n.t(&format!("metric.{}", self.history_ui.metric))).show_ui(ui, |ui| {
                 for k in MetricKind::ALL {
-                    ui.selectable_value(&mut self.history_ui.metric, k.as_str().to_string(), k.as_str());
+                    ui.selectable_value(&mut self.history_ui.metric, k.as_str().to_string(), i18n.t(&format!("metric.{}", k.as_str())));
                 }
             });
-            for (label, s) in [("12 h", 12 * 3600), ("24 h", 86_400), ("7 d", 7 * 86_400), ("30 d", 30 * 86_400), ("12 m", 365 * 86_400)] {
-                ui.selectable_value(&mut self.history_ui.range_s, s, label);
+            for (label, s) in [("range.12h", 12 * 3600), ("range.24h", 86_400), ("range.7d", 7 * 86_400), ("range.30d", 30 * 86_400), ("range.12m", 365 * 86_400)] {
+                ui.selectable_value(&mut self.history_ui.range_s, s, i18n.t(label));
             }
         });
         let key = format!("{}:{}:{}", self.history_ui.metric, self.history_ui.range_s, self.history_ui.rank_metric);
@@ -731,33 +889,34 @@ impl PulseApp {
             self.history_ui.cache = Some((key, Instant::now(), pts, rank));
         }
         let metric = self.history_ui.metric.clone();
+        let loc_i18n = i18n.clone();
         let fmt = move |v: f64| match metric.as_str() {
             "memory" => u.bytes(v as u64),
             "disk" | "network" => u.rate(v),
             "temperature" => u.temp(v),
-            "power" | "neural" => format!("{v:.1} W"),
+            "power" | "neural" => loc_i18n.num(format!("{v:.1} W")),
             _ => format!("{v:.0}"),
         };
         if let Some((_, _, pts, rank)) = &self.history_ui.cache {
-            widgets::card(ui, |ui| widgets::history_chart(ui, pts, 220.0, pal.accent, &fmt));
+            widgets::card(ui, |ui| widgets::history_chart(ui, &i18n, pts, 220.0, pal.accent, &fmt));
             widgets::card(ui, |ui| {
                 ui.horizontal(|ui| {
-                    ui.heading("Ranking for the period");
-                    ui.selectable_value(&mut self.history_ui.rank_metric, "app_memory".to_string(), "Memory");
-                    ui.selectable_value(&mut self.history_ui.rank_metric, "app_energy".to_string(), "Energy");
+                    ui.heading(i18n.t("hist.ranking"));
+                    ui.selectable_value(&mut self.history_ui.rank_metric, "app_memory".to_string(), i18n.t("tab.memory"));
+                    ui.selectable_value(&mut self.history_ui.rank_metric, "app_energy".to_string(), i18n.t("hist.energy"));
                     ui.selectable_value(&mut self.history_ui.rank_metric, "app_cpu".to_string(), "CPU");
                 });
                 let rm = self.history_ui.rank_metric.clone();
                 for (i, r) in rank.iter().enumerate() {
                     let v = match rm.as_str() {
-                        "app_memory" => format!("avg {} · peak {}", u.bytes(r.avg as u64), u.bytes(r.peak as u64)),
-                        "app_energy" => format!("{:.1} Wh · avg {:.2} W", r.integral / 3600.0, r.avg),
-                        _ => format!("avg {:.1} % · peak {:.0} %", r.avg, r.peak),
+                        "app_memory" => i18n.tf("hist.avg_peak", &[("avg", &u.bytes(r.avg as u64)), ("peak", &u.bytes(r.peak as u64))]),
+                        "app_energy" => i18n.tf("hist.wh", &[("wh", &i18n.num(format!("{:.1}", r.integral / 3600.0))), ("w", &i18n.num(format!("{:.2}", r.avg)))]),
+                        _ => i18n.tf("hist.avg_peak", &[("avg", &i18n.num(format!("{:.1} %", r.avg))), ("peak", &format!("{:.0} %", r.peak))]),
                     };
                     ui.label(format!("{}. {}  —  {v}", i + 1, r.app));
                 }
                 if rank.is_empty() {
-                    ui.label(RichText::new("No data for this period yet.").weak());
+                    ui.label(RichText::new(i18n.t("hist.no_data")).weak());
                 }
             });
         }
@@ -782,11 +941,11 @@ impl PulseApp {
     }
 
     /// Up / down chevrons pinned to the right edge of a row; returns the requested move.
-    fn move_buttons(ui: &mut egui::Ui, i: usize, n: usize, what: &str) -> Option<(usize, usize)> {
+    fn move_buttons(ui: &mut egui::Ui, i18n: &I18n, i: usize, n: usize, what: &str) -> Option<(usize, usize)> {
         let mut mv = None;
         ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
-            let down_tip = format!("Move {what} down");
-            let up_tip = format!("Move {what} up");
+            let down_tip = i18n.tf("move_down", &[("what", what)]);
+            let up_tip = i18n.tf("move_up", &[("what", what)]);
             ui.add_enabled_ui(i + 1 < n, |ui| {
                 if widgets::icon_button(ui, widgets::ActionIcon::MoveDown, ui.visuals().strong_text_color(), &down_tip).clicked() {
                     mv = Some((i, i + 1));
@@ -803,43 +962,56 @@ impl PulseApp {
 
     fn settings_tab(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         let mut changed = false;
+        let i18n = self.i18n.clone();
         let s = &mut self.settings;
-        Self::section(ui, "Units", "", |ui| {
+        Self::section(ui, &i18n.t("set.units"), "", |ui| {
             ui.horizontal_wrapped(|ui| {
                 changed |= ui.radio_value(&mut s.units.temperature, TempUnit::Celsius, "°C").changed();
                 changed |= ui.radio_value(&mut s.units.temperature, TempUnit::Fahrenheit, "°F").changed();
                 ui.separator();
-                changed |= ui.radio_value(&mut s.units.data, DataUnit::Bytes, "Bytes").changed();
-                changed |= ui.radio_value(&mut s.units.data, DataUnit::Bits, "Bits").changed();
+                changed |= ui.radio_value(&mut s.units.data, DataUnit::Bytes, i18n.t("set.bytes")).changed();
+                changed |= ui.radio_value(&mut s.units.data, DataUnit::Bits, i18n.t("set.bits")).changed();
                 ui.separator();
-                changed |= ui.radio_value(&mut s.units.cpu, CpuUnit::PercentOfMac, "% of Mac").changed();
-                changed |= ui.radio_value(&mut s.units.cpu, CpuUnit::PerCore, "Per core").changed();
+                changed |= ui.radio_value(&mut s.units.cpu, CpuUnit::PercentOfMac, i18n.t("set.pct_of_mac")).changed();
+                changed |= ui.radio_value(&mut s.units.cpu, CpuUnit::PerCore, i18n.t("set.per_core")).changed();
             });
         });
-        Self::section(ui, "Appearance", "", |ui| {
+        Self::section(ui, &i18n.t("set.appearance"), "", |ui| {
             ui.horizontal_wrapped(|ui| {
-                changed |= ui.radio_value(&mut s.theme, Theme::Monochrome, "Monochrome").changed();
-                changed |= ui.radio_value(&mut s.theme, Theme::Brand, "Brand colour").changed();
-                changed |= ui.radio_value(&mut s.theme, Theme::ColorBlind, "Colour-blind safe").changed();
+                changed |= ui.radio_value(&mut s.theme, Theme::Monochrome, i18n.t("set.monochrome")).changed();
+                changed |= ui.radio_value(&mut s.theme, Theme::Brand, i18n.t("set.brand")).changed();
+                changed |= ui.radio_value(&mut s.theme, Theme::ColorBlind, i18n.t("set.colorblind")).changed();
             });
             ui.horizontal_wrapped(|ui| {
-                changed |= ui.radio_value(&mut s.number_font, NumberFont::Proportional, "Proportional numbers").changed();
-                changed |= ui.radio_value(&mut s.number_font, NumberFont::Monospace, "Monospaced numbers").changed();
-                changed |= ui.checkbox(&mut s.compact, "Compact density").changed();
+                changed |= ui.radio_value(&mut s.number_font, NumberFont::Proportional, i18n.t("set.proportional")).changed();
+                changed |= ui.radio_value(&mut s.number_font, NumberFont::Monospace, i18n.t("set.monospaced")).changed();
+                changed |= ui.checkbox(&mut s.compact, i18n.t("set.compact")).changed();
             });
             ui.add_space(4.0);
             ui.horizontal(|ui| {
-                ui.label(RichText::new("Language").weak());
-                let cur = s.language.clone().unwrap_or_else(|| "System".into());
+                ui.label(RichText::new(i18n.t("set.language")).weak());
+                let partial = |code: &str| PARTIAL.iter().find(|(c, _)| *c == code).map(|(_, n)| i18n.tf("set.lang_partial", &[("name", n)]));
+                let cur = match s.language.as_deref() {
+                    None => i18n.t("set.lang_system"),
+                    Some("en") => "English".to_string(),
+                    Some("es") => "Español".to_string(),
+                    Some(other) => partial(other).unwrap_or_else(|| other.to_string()),
+                };
                 egui::ComboBox::from_id_salt("lang").selected_text(cur).show_ui(ui, |ui| {
-                    changed |= ui.selectable_value(&mut s.language, None, "System").changed();
-                    for l in LANGS {
-                        changed |= ui.selectable_value(&mut s.language, Some(l.to_string()), l).changed();
+                    changed |= ui.selectable_value(&mut s.language, None, i18n.t("set.lang_system")).changed();
+                    for (code, name) in [("en", "English"), ("es", "Español")] {
+                        debug_assert!(COMPLETE.contains(&code));
+                        changed |= ui.selectable_value(&mut s.language, Some(code.to_string()), name).changed();
+                    }
+                    // Incomplete translations stay selectable only for someone who already has one.
+                    if let Some(code) = s.language.clone().filter(|c| PARTIAL.iter().any(|(p, _)| p == c)) {
+                        let label = partial(&code).unwrap_or_else(|| code.clone());
+                        changed |= ui.selectable_value(&mut s.language, Some(code), label).changed();
                     }
                 });
             });
         });
-        Self::section(ui, "Menu bar", "", |ui| {
+        Self::section(ui, &i18n.t("set.menu_bar"), "", |ui| {
             let mut mv: Option<(usize, usize)> = None;
             let n = s.menubar.len();
             for (i, it) in s.menubar.iter_mut().enumerate() {
@@ -848,25 +1020,25 @@ impl PulseApp {
                 }
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 10.0;
-                    Self::settings_cell(ui, 140.0, |ui| changed |= ui.checkbox(&mut it.visible, it.metric.label()).changed());
+                    Self::settings_cell(ui, 140.0, |ui| changed |= ui.checkbox(&mut it.visible, i18n.t(it.metric.key())).changed());
                     Self::settings_cell(ui, 104.0, |ui| {
                         egui::ComboBox::from_id_salt(format!("disp{i}"))
                             .width(92.0)
-                            .selected_text(match it.display {
-                                MenuDisplay::Number => "Number",
-                                MenuDisplay::Sparkline => "Graph",
-                                MenuDisplay::Both => "Both",
-                            })
+                            .selected_text(i18n.t(match it.display {
+                                MenuDisplay::Number => "set.number",
+                                MenuDisplay::Sparkline => "set.graph",
+                                MenuDisplay::Both => "set.both",
+                            }))
                             .show_ui(ui, |ui| {
-                                changed |= ui.selectable_value(&mut it.display, MenuDisplay::Number, "Number").changed();
-                                changed |= ui.selectable_value(&mut it.display, MenuDisplay::Sparkline, "Graph").changed();
-                                changed |= ui.selectable_value(&mut it.display, MenuDisplay::Both, "Both").changed();
+                                changed |= ui.selectable_value(&mut it.display, MenuDisplay::Number, i18n.t("set.number")).changed();
+                                changed |= ui.selectable_value(&mut it.display, MenuDisplay::Sparkline, i18n.t("set.graph")).changed();
+                                changed |= ui.selectable_value(&mut it.display, MenuDisplay::Both, i18n.t("set.both")).changed();
                             });
                     });
-                    Self::settings_cell(ui, 84.0, |ui| changed |= ui.checkbox(&mut it.framed, "Framed").changed());
+                    Self::settings_cell(ui, 84.0, |ui| changed |= ui.checkbox(&mut it.framed, i18n.t("set.framed")).changed());
                     Self::settings_cell(ui, 112.0, |ui| {
                         let mut has = it.threshold.is_some();
-                        if ui.checkbox(&mut has, "Red above").changed() {
+                        if ui.checkbox(&mut has, i18n.t("set.red_above")).changed() {
                             it.threshold = if has { Some(it.metric.default_threshold().unwrap_or(80.0)) } else { None };
                             changed = true;
                         }
@@ -876,7 +1048,7 @@ impl PulseApp {
                             changed |= ui.add(egui::DragValue::new(t).speed(1.0)).changed();
                         }
                     });
-                    if let Some(m) = Self::move_buttons(ui, i, n, it.metric.label()) {
+                    if let Some(m) = Self::move_buttons(ui, &i18n, i, n, &i18n.t(it.metric.key())) {
                         mv = Some(m);
                     }
                 });
@@ -886,25 +1058,42 @@ impl PulseApp {
                 changed = true;
             }
         });
-        Self::section(ui, "Tabs", "", |ui| {
+        Self::section(ui, &i18n.t("set.tabs"), "", |ui| {
             let mut mv: Option<(usize, usize)> = None;
-            let n = s.tabs.len();
-            let i18n = I18n::new(s.language.as_deref());
-            for (i, t) in s.tabs.iter_mut().enumerate() {
-                if i > 0 {
-                    Self::settings_divider(ui);
+            // Same groups as the sidebar; order only matters (and can only change) within a group.
+            let mut first = true;
+            for (g, idx) in sidebar::grouped_indices(&s.tabs, false) {
+                if let Some(h) = g.header_key() {
+                    ui.add_space(if first { 0.0 } else { 8.0 });
+                    ui.label(RichText::new(i18n.t(h).to_uppercase()).size(10.5).strong().color(ui.visuals().weak_text_color()));
                 }
-                ui.horizontal(|ui| {
-                    let enabled = t.tab != Tab::Settings;
-                    let label = i18n.t(t.tab.key());
-                    Self::settings_cell(ui, 200.0, |ui| {
-                        changed |= ui.add_enabled(enabled, egui::Checkbox::new(&mut t.visible, label.clone())).changed();
-                    });
-                    if let Some(m) = Self::move_buttons(ui, i, n, &label) {
-                        mv = Some(m);
+                first = false;
+                let n = idx.len();
+                for (pos, &i) in idx.iter().enumerate() {
+                    if pos > 0 {
+                        Self::settings_divider(ui);
                     }
-                });
+                    let tab = s.tabs[i].tab;
+                    let label = i18n.t(tab.key());
+                    ui.horizontal(|ui| {
+                        Self::settings_cell(ui, 200.0, |ui| {
+                            changed |= ui.checkbox(&mut s.tabs[i].visible, label.clone()).changed();
+                        });
+                        if tab != Tab::History
+                            && let Some((a, b)) = Self::move_buttons(ui, &i18n, pos, n, &label)
+                        {
+                            mv = Some((idx[a], idx[b]));
+                        }
+                    });
+                }
             }
+            // Settings is always shown and pinned last, so it has no checkbox state or move buttons.
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                Self::settings_cell(ui, 200.0, |ui| {
+                    ui.add_enabled(false, egui::Checkbox::new(&mut true, i18n.t(Tab::Settings.key())));
+                });
+            });
             if let Some((a, b)) = mv {
                 s.move_tab(a, b);
                 changed = true;
@@ -916,24 +1105,24 @@ impl PulseApp {
                 changed = true;
             }
         });
-        Self::section(ui, "History & alerts", "", |ui| {
+        Self::section(ui, &i18n.t("set.history_alerts"), "", |ui| {
             ui.horizontal(|ui| {
-                ui.label("Keep history for");
-                for (r, l) in [(Retention::Days30, "30 days"), (Retention::Days90, "90 days"), (Retention::Months6, "6 months"), (Retention::Year1, "1 year")] {
-                    changed |= ui.radio_value(&mut s.retention, r, l).changed();
+                ui.label(i18n.t("set.keep_history"));
+                for (r, l) in [(Retention::Days30, "set.days30"), (Retention::Days90, "set.days90"), (Retention::Months6, "set.months6"), (Retention::Year1, "set.year1")] {
+                    changed |= ui.radio_value(&mut s.retention, r, i18n.t(l)).changed();
                 }
             });
             ui.horizontal(|ui| {
-                changed |= ui.checkbox(&mut s.notifications, "Notifications").changed();
-                ui.label("Idle dev server after (min)");
+                changed |= ui.checkbox(&mut s.notifications, i18n.t("set.notifications")).changed();
+                ui.label(i18n.t("set.idle_after"));
                 changed |= ui.add(egui::DragValue::new(&mut s.idle_threshold_min).range(5..=1440)).changed();
-                ui.label("Disk write alert (MB/s)");
+                ui.label(i18n.t("set.disk_alert"));
                 let mut mb = s.alert_disk_write_bps / 1e6;
                 if ui.add(egui::DragValue::new(&mut mb).range(1.0..=10_000.0)).changed() {
                     s.alert_disk_write_bps = mb * 1e6;
                     changed = true;
                 }
-                ui.label("Network alert (MB/s)");
+                ui.label(i18n.t("set.net_alert"));
                 let mut nb = s.alert_network_bps / 1e6;
                 if ui.add(egui::DragValue::new(&mut nb).range(1.0..=10_000.0)).changed() {
                     s.alert_network_bps = nb * 1e6;
@@ -941,7 +1130,7 @@ impl PulseApp {
                 }
             });
         });
-        Self::section(ui, "AI plans (local only)", "", |ui| {
+        Self::section(ui, &i18n.t("set.ai_plans"), "", |ui| {
             let mut remove = None;
             for (i, p) in s.plans.iter_mut().enumerate() {
                 ui.horizontal(|ui| {
@@ -951,10 +1140,10 @@ impl PulseApp {
                         }
                     });
                     changed |= ui.add(egui::TextEdit::singleline(&mut p.plan).desired_width(90.0)).changed();
-                    ui.label("window h");
+                    ui.label(i18n.t("set.window_h"));
                     changed |= ui.add(egui::DragValue::new(&mut p.window_hours).range(1.0..=744.0)).changed();
                     if p.provider == "claude" {
-                        ui.label("token budget");
+                        ui.label(i18n.t("set.token_budget"));
                         let mut b = p.budget.unwrap_or(0.0);
                         if ui.add(egui::DragValue::new(&mut b).speed(100_000.0)).changed() {
                             p.budget = (b > 0.0).then_some(b);
@@ -962,7 +1151,7 @@ impl PulseApp {
                         }
                     }
                     if p.provider != "codex" {
-                        ui.label("manual used %");
+                        ui.label(i18n.t("set.manual_used"));
                         let mut m = p.manual_used_pct.unwrap_or(-1.0);
                         if ui.add(egui::DragValue::new(&mut m).range(-1.0..=100.0)).changed() {
                             p.manual_used_pct = (m >= 0.0).then_some(m);
@@ -978,24 +1167,35 @@ impl PulseApp {
                 s.plans.remove(i);
                 changed = true;
             }
-            if ui.button("Add plan").clicked() {
+            if ui.button(i18n.t("set.add_plan")).clicked() {
                 s.plans.push(PlanConfig { provider: "copilot".into(), plan: "Pro".into(), window_hours: 720.0, budget: None, manual_used_pct: None, manual_resets_at: None });
                 changed = true;
             }
-            ui.label(RichText::new("Codex usage is read from ~/.codex/sessions; Claude from ~/.claude/projects. No provider is contacted.").small().weak());
+            ui.label(RichText::new(i18n.t("set.plans_note")).small().weak());
+        });
+        Self::section(ui, &self.i18n.t("kbd.title"), "", |ui| {
+            egui::Grid::new("shortcuts").num_columns(2).spacing([24.0, 6.0]).show(ui, |ui| {
+                for (keys, what) in shortcuts::HELP {
+                    ui.label(RichText::new(*keys).monospace().strong());
+                    ui.label(self.i18n.t(what));
+                    ui.end_row();
+                }
+            });
+            ui.add_space(4.0);
+            ui.label(RichText::new(self.i18n.t("kbd.note")).small().weak());
         });
         let mut copy = None;
-        Self::section(ui, "MCP server", "", |ui| {
-            changed |= ui.checkbox(&mut s.mcp_enabled, "Enable MCP server (stdio) — off by default").changed();
+        Self::section(ui, &i18n.t("set.mcp"), "", |ui| {
+            changed |= ui.checkbox(&mut s.mcp_enabled, i18n.t("set.mcp_enable")).changed();
             let exe = std::env::current_exe().map(|p| p.display().to_string()).unwrap_or("pulsebar".into());
             let cmd = format!("claude mcp add pulsebar -- \"{exe}\" mcp");
             ui.horizontal(|ui| {
                 ui.code(&cmd);
-                if ui.small_button("Copy").clicked() {
+                if ui.small_button(i18n.t("copy")).clicked() {
                     copy = Some(cmd.clone());
                 }
             });
-            ui.label(RichText::new("Tools are read-only except pulsebar_request_quit, which always waits for your approval here.").small().weak());
+            ui.label(RichText::new(i18n.t("set.mcp_note")).small().weak());
         });
         if let Some(c) = copy {
             ctx.copy_text(c);
@@ -1010,6 +1210,8 @@ impl PulseApp {
     // ------------------------------------------------------------------------------------------
 
     fn inspector_panel(&mut self, ctx: &egui::Context, snap: &Arc<Snapshot>) {
+        let u = self.units();
+        let i18n = self.i18n.clone();
         let Some(st) = self.inspector.as_mut() else { return };
         if let Some(rx) = &st.rx
             && let Ok(d) = rx.try_recv() {
@@ -1018,35 +1220,34 @@ impl PulseApp {
                 }
                 st.rx = None;
             }
-        let u = self.settings.units;
         let cores = snap.machine.cpu.core_count;
         let mut close = false;
         let mut quit = None;
         let mut toast = None;
         egui::SidePanel::right("inspector").default_width(420.0).show(ctx, |ui| {
             ui.horizontal(|ui| {
-                ui.heading("Process Inspector");
+                ui.heading(i18n.t("insp.title"));
                 if ui.button("✕").clicked() {
                     close = true;
                 }
             });
             let Some(d) = st.detail.clone() else {
-                ui.label("Process has exited.");
+                ui.label(i18n.t("insp.exited"));
                 return;
             };
             ui.horizontal(|ui| {
-                if ui.button("Copy").clicked() {
-                    ctx.copy_text(inspector::to_text(&d, &u, cores));
-                    toast = Some("Copied".to_string());
+                if ui.button(i18n.t("copy")).clicked() {
+                    ctx.copy_text(inspector::to_text_in(&i18n, &d, &u, cores));
+                    toast = Some(i18n.t("insp.copied"));
                 }
-                if ui.button("Export CSV").clicked() {
+                if ui.button(i18n.t("insp.export_csv")).clicked() {
                     let p = paths::exports_dir().join(format!("pulsebar-process-{}.csv", d.identity.pid));
                     toast = Some(match std::fs::write(&p, inspector::to_csv(&d)) {
-                        Ok(()) => format!("Saved {}", p.display()),
+                        Ok(()) => i18n.tf("saved", &[("path", &p.display().to_string())]),
                         Err(e) => e.to_string(),
                     });
                 }
-                if ui.button("Open in Terminal").clicked() {
+                if ui.button(i18n.t("insp.open_terminal")).clicked() {
                     let exe = std::env::current_exe().map(|p| p.display().to_string()).unwrap_or("pulsebar".into());
                     let script = format!("tell application \"Terminal\" to do script \"'{exe}' process {}\"", d.identity.pid);
                     let _ = std::process::Command::new("/usr/bin/osascript").args(["-e", &script]).spawn();
@@ -1056,10 +1257,10 @@ impl PulseApp {
                 }
             });
             if st.rx.is_some() {
-                ui.label(RichText::new("Checking code signature…").weak());
+                ui.label(RichText::new(i18n.t("insp.checking")).weak());
             }
             egui::ScrollArea::vertical().show(ui, |ui| {
-                ui.monospace(inspector::to_text(&d, &u, cores));
+                ui.monospace(inspector::to_text_in(&i18n, &d, &u, cores));
             });
         });
         if close {
@@ -1093,10 +1294,10 @@ impl PulseApp {
             let d = Dialog {
                 id: "confirm",
                 icon: self.plan_icon(ctx, snap, &plan, tone),
-                title: plan.headline(),
+                title: plan.headline_in(&self.i18n),
                 subject: None,
-                lines: if force { vec!["The process is stopped immediately; unsaved work is lost.".into()] } else { vec![] },
-                chips: plan.details(),
+                lines: if force { vec![self.t("dialog.force_note")] } else { vec![] },
+                chips: plan.details_in(&self.i18n),
                 cancel: self.i18n.t("cancel"),
                 confirm: if force { self.i18n.t("force_quit") } else { self.i18n.t("quit") },
                 confirm_color: if force { pal.danger } else { pal.accent },
@@ -1104,8 +1305,10 @@ impl PulseApp {
             };
             match dialog::show(ctx, &d) {
                 Some(true) => {
+                    let shown = plan.clone();
                     let o = actions::execute(actions::confirm(plan, HumanYes::from_ui_click()));
-                    self.toast(o.message);
+                    let m = actions::outcome_message(&self.i18n, &shown, &o);
+                    self.toast(m);
                     self.confirm = None;
                 }
                 Some(false) => self.confirm = None,
@@ -1119,21 +1322,23 @@ impl PulseApp {
             let d = Dialog {
                 id: "pending",
                 icon: DialogIcon::Warning(tone),
-                title: "An assistant asks to stop something".into(),
-                subject: Some(req.plan.headline()),
-                lines: vec![format!("Request from {} (MCP)", req.source)],
-                chips: req.plan.details(),
-                cancel: "Deny".into(),
-                confirm: "Allow".into(),
+                title: self.t("dialog.assistant_asks"),
+                subject: Some(req.plan.headline_in(&self.i18n)),
+                lines: vec![self.tf("dialog.request_from", &[("source", &req.source)])],
+                chips: req.plan.details_in(&self.i18n),
+                cancel: self.t("deny"),
+                confirm: self.t("allow"),
                 confirm_color: if force { pal.danger } else { pal.accent },
                 // Unlike the quit confirmation, this one appears unprompted: a stray Return
                 // must never approve it.
                 enter_confirms: false,
             };
             if let Some(yes) = dialog::show(ctx, &d) {
+                let plan = req.plan.clone();
                 let r = actions::resolve_pending(req, yes.then(HumanYes::from_ui_click));
                 if let Ok(r) = r {
-                    self.toast(r.outcome.map(|o| o.message).unwrap_or_else(|| "Request denied.".into()));
+                    let m = r.outcome.map(|o| actions::outcome_message(&self.i18n, &plan, &o)).unwrap_or_else(|| self.t("dialog.denied"));
+                    self.toast(m);
                 }
                 self.pending.remove(0);
             }
@@ -1150,16 +1355,16 @@ impl PulseApp {
         let mut quit = None;
         for (i, a) in alerts.iter().enumerate().rev().take(3) {
             ui.horizontal(|ui| {
-                ui.label(RichText::new(format!("⚠ {}", a.message)).color(pal.danger));
-                if !a.app_key.is_empty() && ui.small_button("Quit now…").clicked() {
+                ui.label(RichText::new(format!("⚠ {}", a.text(&self.i18n))).color(pal.danger));
+                if !a.app_key.is_empty() && ui.small_button(self.i18n.t("alert.quit_now")).clicked() {
                     quit = Some(a.app_key.clone());
                     dismiss = Some(i);
                 }
-                if ui.small_button("Silence 24 h").clicked() {
+                if ui.small_button(self.i18n.t("alert.silence")).clicked() {
                     crate::daemon::snooze_alert(a, sys::now_s() + 86_400);
                     dismiss = Some(i);
                 }
-                if ui.small_button("Dismiss").clicked() {
+                if ui.small_button(self.i18n.t("alert.dismiss")).clicked() {
                     dismiss = Some(i);
                 }
             });
@@ -1208,6 +1413,11 @@ impl eframe::App for PulseApp {
         let focused = ctx.input(|i| i.viewport().focused.unwrap_or(true));
         self.shared.foreground.store(focused, Ordering::Relaxed);
         self.handle_nav();
+        // ⌘F focuses the search field of the current tab's app list.
+        // Ignored while a dialog is open, like Esc in the search field.
+        if ctx.input_mut(|i| i.consume_shortcut(&egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::F))) && !self.dialog_open() {
+            self.focus_search = true;
+        }
         if self.last_pending_poll.elapsed() > Duration::from_secs(1) {
             let fresh = actions::list_pending();
             if !fresh.is_empty() && self.pending.is_empty() {
@@ -1223,35 +1433,16 @@ impl eframe::App for PulseApp {
         let snap = self.shared.snapshot.read().unwrap().clone();
         let Some(snap) = snap else {
             egui::CentralPanel::default().show(ctx, |ui| {
-                ui.centered_and_justified(|ui| ui.label("Sampling…"));
+                ui.centered_and_justified(|ui| ui.label(self.i18n.t("sampling")));
             });
             return;
         };
 
-        egui::TopBottomPanel::top("tabs").show_separator_line(false).show(ctx, |ui| {
-            ui.add_space(8.0);
-            let dark = ui.visuals().dark_mode;
-            let strip = if dark { Color32::from_rgb(28, 28, 31) } else { Color32::from_rgb(230, 230, 235) };
-            let accent = widgets::metric_color(self.settings.theme, dark, MetricKind::Cpu);
-            egui::Frame::new().fill(strip).corner_radius(12.0).inner_margin(4.0).show(ui, |ui| {
-                ui.horizontal_wrapped(|ui| {
-                    ui.spacing_mut().item_spacing.x = 2.0;
-                    let tabs = self.settings.tabs.clone();
-                    for t in tabs.iter().filter(|t| t.visible) {
-                        let selected = self.tab == t.tab;
-                        let text = RichText::new(format!("{}  {}", tab_glyph(t.tab), self.i18n.t(t.tab.key()))).size(13.0);
-                        let text = if selected { text.color(accent) } else { text };
-                        let fill = if selected { accent.gamma_multiply(0.18) } else { Color32::TRANSPARENT };
-                        let b = egui::Button::new(text).fill(fill).stroke(egui::Stroke::NONE).corner_radius(9.0).min_size(Vec2::new(0.0, 30.0));
-                        if ui.add(b).clicked() {
-                            self.tab = t.tab;
-                            self.highlight = None;
-                        }
-                    }
-                });
-            });
-            ui.add_space(6.0);
-        });
+        self.handle_shortcuts(ctx, &snap);
+        // The list on screen refills this while it is drawn.
+        self.list_rows.clear();
+
+        self.sidebar(ctx, &snap);
         if !self.toasts.is_empty() {
             egui::TopBottomPanel::bottom("toasts").show(ctx, |ui| {
                 for (_, t) in &self.toasts {
@@ -1281,6 +1472,10 @@ impl eframe::App for PulseApp {
                 Tab::Settings => self.settings_tab(ui, ctx),
             });
         });
+        // Tabs without an app list ignore ⌘F; don't let the request linger into the next tab.
+        self.focus_search = false;
         self.dialogs(ctx, &snap);
+        self.scroll_to_sel = false;
+        self.text_focus = ctx.output(|o| o.ime.is_some());
     }
 }

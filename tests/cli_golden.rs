@@ -94,3 +94,23 @@ fn acceptance_examples_from_the_spec() {
     assert_eq!(pulsebar::docker::card_line(rabbit), "rabbitmq — 206 MB — 86 % of 240 MB — up 3 hours — port 5672");
     assert_eq!(pulsebar::limits::headline(&s.plans[0], s.timestamp / 1000), "Claude · Max 20x · This week 72% left · Resets 4 d 2 h");
 }
+
+/// The share card is worded and formatted by the caller; the CLI's choice (English, default
+/// units) is what it always drew, and Spanish gets translated text and decimal commas.
+#[test]
+fn share_card_languages() {
+    use pulsebar::cli::card_for_in;
+    use pulsebar::i18n::I18n;
+    let s = fixture();
+    let (en, es) = (I18n::english(), I18n::new(Some("es")));
+    let units = Units::default();
+    let c = card_for_in(&en, &units, &s, RankMetric::Memory, true);
+    assert_eq!(c.title, "Memory by App");
+    assert_eq!(c.subtitle, format!("{} processes → {} apps", s.processes.len(), s.apps.len()));
+    assert!(c.rows.iter().all(|r| r.2.ends_with("process") || r.2.ends_with("processes")));
+    let ces = card_for_in(&es, &Units { decimal_comma: true, ..units }, &s, RankMetric::Memory, false);
+    assert_eq!(ces.title, "Memoria por app");
+    assert!(ces.subtitle.contains("procesos →") && ces.subtitle.ends_with("apps"), "{}", ces.subtitle);
+    assert!(ces.rows.iter().all(|r| r.2.contains("proceso")), "{:?}", ces.rows);
+    assert_eq!(card_for_in(&es, &units, &s, RankMetric::Energy, true).title, "Consumo por app");
+}

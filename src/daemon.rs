@@ -243,8 +243,10 @@ fn run(sh: Arc<Shared>, settings: Settings) {
                     }
                 }
                 if st.notifications {
+                    let i18n = crate::i18n::I18n::new(st.language.as_deref());
                     for a in &fired {
-                        alerts::notify(if a.app_name.is_empty() { "Alert" } else { &a.app_name }, &a.message);
+                        let title = if a.app_name.is_empty() { i18n.t("alert.title") } else { a.app_name.clone() };
+                        alerts::notify(&title, &a.text(&i18n));
                     }
                 }
                 let mut all = read_alerts();

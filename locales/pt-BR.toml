@@ -37,3 +37,13 @@ search.more = "+{n} mais"
 notif.show = "Mostrar"
 notif.quit = "Encerrar app…"
 notif.snooze = "Adiar 1 h"
+
+# --- login item (Open at login)
+login.section = "Inicialização"
+login.toggle = "Abrir ao iniciar sessão"
+login.requires_approval = "Requer aprovação"
+login.open_settings = "Abrir Itens de início…"
+login.unbundled = "Disponível apenas no app PulseBar instalado."
+login.error = "Não foi possível alterar o item de início"
+login.offer = "Abrir o PulseBar automaticamente ao iniciar sessão?"
+login.not_now = "Agora não"

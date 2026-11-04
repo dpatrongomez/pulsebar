@@ -37,3 +37,13 @@ search.more = "+{n} meer"
 notif.show = "Toon"
 notif.quit = "App stoppen…"
 notif.snooze = "1 uur uitstellen"
+
+# --- login item (Open at login)
+login.section = "Opstarten"
+login.toggle = "Openen bij inloggen"
+login.requires_approval = "Goedkeuring vereist"
+login.open_settings = "Open inlogonderdelen…"
+login.unbundled = "Alleen beschikbaar in de geïnstalleerde PulseBar-app."
+login.error = "Kan het inlogonderdeel niet wijzigen"
+login.offer = "PulseBar automatisch openen bij inloggen?"
+login.not_now = "Niet nu"

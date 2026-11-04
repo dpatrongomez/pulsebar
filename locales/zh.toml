@@ -37,3 +37,13 @@ search.more = "+{n} 更多"
 notif.show = "显示"
 notif.quit = "退出应用…"
 notif.snooze = "延后 1 小时"
+
+# --- login item (Open at login)
+login.section = "启动"
+login.toggle = "登录时打开"
+login.requires_approval = "需要批准"
+login.open_settings = "打开登录项…"
+login.unbundled = "仅在已安装的 PulseBar 应用中可用。"
+login.error = "无法更改登录项"
+login.offer = "登录时自动打开 PulseBar？"
+login.not_now = "暂不"

@@ -37,3 +37,13 @@ search.more = "+{n} 件"
 notif.show = "表示"
 notif.quit = "アプリを終了…"
 notif.snooze = "1時間スヌーズ"
+
+# --- login item (Open at login)
+login.section = "起動"
+login.toggle = "ログイン時に開く"
+login.requires_approval = "承認が必要"
+login.open_settings = "ログイン項目を開く…"
+login.unbundled = "インストール済みの PulseBar アプリでのみ利用できます。"
+login.error = "ログイン項目を変更できませんでした"
+login.offer = "ログイン時に PulseBar を自動的に開きますか？"
+login.not_now = "今はしない"

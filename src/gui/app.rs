@@ -28,6 +28,7 @@ use crate::units::{CpuUnit, DataUnit, TempUnit, Units, format_duration};
 use crate::{docker, output, paths, projects, share_card, sys};
 
 mod detail;
+mod login;
 mod sidebar;
 mod tabs;
 
@@ -155,6 +156,7 @@ pub struct PulseApp {
     started: Option<Instant>,
     screenshot_requested: bool,
     series_cache: HashMap<String, (Instant, Vec<f64>)>,
+    login: login::LoginUi,
     /// Search query per tab (kept while the window is open).
     search: HashMap<Tab, String>,
     /// Set by ⌘F; the visible app list's search field takes focus on the next paint.
@@ -199,6 +201,7 @@ impl PulseApp {
             started: None,
             screenshot_requested: false,
             series_cache: HashMap::new(),
+            login: login::LoginUi::new(),
             search: HashMap::new(),
             focus_search: false,
             shared,
@@ -965,6 +968,7 @@ impl PulseApp {
     }
 
     fn settings_tab(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        self.login_section(ui);
         let mut changed = false;
         let i18n = self.i18n.clone();
         let s = &mut self.settings;
@@ -1461,6 +1465,7 @@ impl eframe::App for PulseApp {
         self.inspector_panel(ctx, &snap);
         self.detail_panel(ctx, &snap);
         egui::CentralPanel::default().show(ctx, |ui| {
+            self.login_banner(ui);
             self.alerts_bar(ui, &snap);
             egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| match self.tab {
                 Tab::Overview => self.overview(ui, &snap),

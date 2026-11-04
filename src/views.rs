@@ -4,6 +4,7 @@
 use serde_json::{Value, json};
 
 use crate::model::*;
+use crate::login_item::LoginStatus;
 use crate::{docker, limits, projects};
 
 fn mine(s: &Snapshot, uid: u32) -> impl Iterator<Item = &Process> {
@@ -132,6 +133,11 @@ pub fn limits(s: &Snapshot) -> Value {
         "used_pct": r1(p.used_pct), "resets_at": p.resets_at, "pace": p.pace_state, "pace_text": p.pace_text,
         "headline": limits::headline(p, now), "source": p.source,
     })).collect::<Vec<_>>()})
+}
+
+/// `config login --json`: a stable `status` token plus a human `message` that may be reworded.
+pub fn login(status: &LoginStatus) -> Value {
+    json!({"login": {"enabled": status.is_on(), "status": status.token(), "message": status.describe()}})
 }
 
 pub fn containers(s: &Snapshot) -> Value {

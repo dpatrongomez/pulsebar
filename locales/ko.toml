@@ -37,3 +37,13 @@ search.more = "+{n} 개 더"
 notif.show = "보기"
 notif.quit = "앱 종료…"
 notif.snooze = "1시간 미루기"
+
+# --- login item (Open at login)
+login.section = "시작"
+login.toggle = "로그인 시 열기"
+login.requires_approval = "승인 필요"
+login.open_settings = "로그인 항목 열기…"
+login.unbundled = "설치된 PulseBar 앱에서만 사용할 수 있습니다."
+login.error = "로그인 항목을 변경할 수 없습니다"
+login.offer = "로그인 시 PulseBar를 자동으로 열까요?"
+login.not_now = "나중에"

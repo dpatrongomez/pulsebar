@@ -476,3 +476,13 @@ detail.no_history = "Aún no hay suficiente historial. Se guarda para las apps m
 notif.show = "Mostrar"
 notif.quit = "Salir de la app…"
 notif.snooze = "Posponer 1 h"
+
+# --- login item (Open at login)
+login.section = "Inicio"
+login.toggle = "Abrir al iniciar sesión"
+login.requires_approval = "Requiere aprobación"
+login.open_settings = "Abrir Ítems de inicio…"
+login.unbundled = "Solo disponible en la app PulseBar instalada."
+login.error = "No se pudo cambiar el ítem de inicio"
+login.offer = "¿Abrir PulseBar automáticamente al iniciar sesión?"
+login.not_now = "Ahora no"

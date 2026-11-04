@@ -37,3 +37,13 @@ search.more = "+{n} de plus"
 notif.show = "Afficher"
 notif.quit = "Quitter l’app…"
 notif.snooze = "Reporter 1 h"
+
+# --- login item (Open at login)
+login.section = "Démarrage"
+login.toggle = "Ouvrir à la connexion"
+login.requires_approval = "Approbation requise"
+login.open_settings = "Ouvrir les éléments de connexion…"
+login.unbundled = "Disponible uniquement dans l’app PulseBar installée."
+login.error = "Impossible de modifier l’élément de connexion"
+login.offer = "Ouvrir PulseBar automatiquement à la connexion ?"
+login.not_now = "Pas maintenant"

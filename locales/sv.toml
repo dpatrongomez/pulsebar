@@ -37,3 +37,13 @@ search.more = "+{n} till"
 notif.show = "Visa"
 notif.quit = "Avsluta appen…"
 notif.snooze = "Snooza 1 h"
+
+# --- login item (Open at login)
+login.section = "Start"
+login.toggle = "Öppna vid inloggning"
+login.requires_approval = "Kräver godkännande"
+login.open_settings = "Öppna Inloggningsobjekt…"
+login.unbundled = "Endast tillgängligt i den installerade PulseBar-appen."
+login.error = "Det gick inte att ändra inloggningsobjektet"
+login.offer = "Öppna PulseBar automatiskt vid inloggning?"
+login.not_now = "Inte nu"

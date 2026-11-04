@@ -36,6 +36,7 @@ objc2-foundation = { version = "0.3", optional = true, default-features = false,
 objc2-user-notifications = { version = "0.3", optional = true, default-features = false, features = ["std", "block2", "bitflags", "UNNotification", "UNNotificationAction", "UNNotificationCategory", "UNNotificationContent", "UNNotificationRequest", "UNNotificationResponse", "UNNotificationSettings", "UNNotificationSound", "UNNotificationTrigger", "UNUserNotificationCenter"] }
 block2 = { version = "0.6", optional = true }
 dispatch2 = { version = "0.3", optional = true }
+objc2-service-management = { version = "0.3", default-features = false, features = ["std", "SMAppService", "objc2", "objc2-foundation"] }
 
 [dev-dependencies]
 jsonschema = { version = "0.60.2", default-features = false }

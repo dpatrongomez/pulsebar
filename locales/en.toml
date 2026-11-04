@@ -477,3 +477,13 @@ detail.no_history = "Not enough history yet. History is kept for the busiest app
 notif.show = "Show"
 notif.quit = "Quit app…"
 notif.snooze = "Snooze 1 h"
+
+# --- login item (Open at login)
+login.section = "Startup"
+login.toggle = "Open at login"
+login.requires_approval = "Requires approval"
+login.open_settings = "Open Login Items…"
+login.unbundled = "Only available in the installed PulseBar app."
+login.error = "Couldn’t change the login item"
+login.offer = "Open PulseBar automatically when you log in?"
+login.not_now = "Not now"

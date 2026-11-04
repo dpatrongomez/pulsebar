@@ -37,3 +37,13 @@ search.more = "+{n} ще"
 notif.show = "Показати"
 notif.quit = "Завершити програму…"
 notif.snooze = "Відкласти на 1 год"
+
+# --- login item (Open at login)
+login.section = "Запуск"
+login.toggle = "Відкривати під час входу"
+login.requires_approval = "Потрібне схвалення"
+login.open_settings = "Відкрити елементи входу…"
+login.unbundled = "Доступно лише в установленій програмі PulseBar."
+login.error = "Не вдалося змінити елемент входу"
+login.offer = "Автоматично відкривати PulseBar під час входу?"
+login.not_now = "Не зараз"

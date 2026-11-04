@@ -218,6 +218,8 @@ mod tests {
         assert_eq!(I18n::new(Some("xx")).t("peak"), "Peak");
         assert_eq!(I18n::new(Some("en")).t("missing.key"), "missing.key");
         assert_eq!(I18n::new(Some("es")).t("notif.snooze"), "Posponer 1 h");
+        assert_eq!(I18n::new(Some("es")).t("login.toggle"), "Abrir al iniciar sesión");
+        assert_eq!(I18n::new(Some("en")).t("login.requires_approval"), "Requires approval");
         assert_eq!(I18n::new(Some("es")).t("detail.open"), "Detalles");
         assert_eq!(I18n::new(Some("de")).t("detail.open"), "Details");
     }

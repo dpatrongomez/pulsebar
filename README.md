@@ -77,6 +77,7 @@ pulsebar containers | process <pid> [--csv] | history <metric> [--range 12h|24h|
 pulsebar stop --idle [--yes] | stop --pid N | stop --app NAME   (always asks unless --yes)
 pulsebar card memory --dark          # 1200×630 share card → ~/Downloads
 pulsebar config mcp on|off | data bits|bytes | temp c|f | reset-layout | show
+pulsebar config login [on|off]   # open at login (needs PulseBar.app); no argument shows the state
 ```
 Add `--json` to any read command; output validates against `schemas/*.schema.json`.
 

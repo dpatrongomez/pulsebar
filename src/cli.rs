@@ -11,7 +11,7 @@ use crate::i18n::I18n;
 use crate::model::{RankMetric, Snapshot};
 use crate::settings::Settings;
 use crate::units::{DataUnit, TempUnit, Units};
-use crate::{history, live, output, paths, projects, sampler, share_card, sys, views};
+use crate::{history, live, login_item, output, paths, projects, sampler, share_card, sys, views};
 
 #[derive(Parser, Debug)]
 #[command(name = "pulsebar", version, about = "App-centric activity monitor for macOS developers")]
@@ -147,6 +147,8 @@ pub enum ConfigAction {
     Temp { unit: TempChoice },
     /// Reset menu bar + tab layout.
     ResetLayout,
+    /// Open PulseBar at login (needs PulseBar.app). Without on/off: show the current state.
+    Login { state: Option<OnOff> },
 }
 
 #[derive(Copy, Clone, Debug, ValueEnum)]
@@ -336,6 +338,19 @@ pub fn run(cli: Cli) -> Result<()> {
             let path = share_card::export(&card, &paths::exports_dir(), &format!("pulsebar-{}", m.as_str()))?;
             println!("{}", path.display());
         }
+        Command::Config { action: ConfigAction::Login { state } } => {
+            // Through the Homebrew symlink Bundle.main doesn't resolve to the app: re-run the real binary.
+            login_item::reexec_from_symlink()?;
+            let status = match state {
+                Some(s) => login_item::set_enabled(matches!(s, OnOff::On)).map_err(|e| anyhow::anyhow!("could not change login item: {}", e.cli_message()))?,
+                None => login_item::status(),
+            };
+            if cli.json {
+                print_json(&views::login(&status))?;
+            } else {
+                println!("Open at login: {}", status.describe());
+            }
+        }
         Command::Config { action } => {
             match action {
                 ConfigAction::Show => {}
@@ -353,6 +368,7 @@ pub fn run(cli: Cli) -> Result<()> {
                     }
                 }
                 ConfigAction::ResetLayout => settings.reset_layout(),
+                ConfigAction::Login { .. } => unreachable!("handled above"),
             }
             settings.save()?;
             println!("{}", serde_json::to_string_pretty(&settings)?);

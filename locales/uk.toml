@@ -34,3 +34,6 @@ search.placeholder = "Пошук програм, процесів, PID, порт
 search.no_matches = "Нічого не знайдено"
 search.apps_count = "Застосунки: {n}"
 search.more = "+{n} ще"
+notif.show = "Показати"
+notif.quit = "Завершити програму…"
+notif.snooze = "Відкласти на 1 год"

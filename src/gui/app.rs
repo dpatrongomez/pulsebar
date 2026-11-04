@@ -137,6 +137,8 @@ pub struct PulseApp {
     inspector: Option<InspectorState>,
     detail: Option<detail::AppDetailState>,
     confirm: Option<Plan>,
+    /// App whose quit confirmation was requested (notification action); opened once sampled.
+    quit_request: Option<String>,
     pending: Vec<PendingRequest>,
     last_pending_poll: Instant,
     toasts: Vec<(Instant, String)>,
@@ -168,12 +170,13 @@ fn local_midnight() -> i64 {
 }
 
 impl PulseApp {
-    pub fn new(cc: &eframe::CreationContext<'_>, shared: Arc<Shared>, tab: Tab, app_key: Option<String>) -> Self {
+    pub fn new(cc: &eframe::CreationContext<'_>, shared: Arc<Shared>, tab: Tab, app_key: Option<String>, quit: bool) -> Self {
         let settings = shared.settings.read().unwrap().clone();
         let app = Self {
             i18n: I18n::new(settings.language.as_deref()),
             tab,
             scroll_to_highlight: app_key.is_some(),
+            quit_request: app_key.clone().filter(|_| quit),
             highlight: app_key,
             sel_proc: None,
             scroll_to_sel: false,
@@ -304,6 +307,7 @@ impl PulseApp {
             self.nav_seen = nav.at_ms;
             self.tab = nav.tab;
             self.scroll_to_highlight = nav.app.is_some();
+            self.quit_request = nav.app.clone().filter(|_| nav.quit);
             // A search on the target tab could hide the app being opened.
             if nav.app.is_some() {
                 self.search.remove(&nav.tab);
@@ -1438,7 +1442,11 @@ impl eframe::App for PulseApp {
             return;
         };
 
-        self.handle_shortcuts(ctx, &snap);
+        if let Some(k) = self.quit_request.take() {
+            self.ask(&snap, Target::App(k), Mode::Quit);
+        }
+
+                self.handle_shortcuts(ctx, &snap);
         // The list on screen refills this while it is drawn.
         self.list_rows.clear();
 

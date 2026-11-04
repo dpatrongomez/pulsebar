@@ -1,6 +1,8 @@
 //! Keyboard shortcuts of the window: the key → action mapping and the app-list navigation rules
 //! are pure functions so they can be unit-tested; `app.rs` only applies the results.
 
+use std::collections::HashMap;
+
 use eframe::egui::{Key, Modifiers};
 
 use crate::settings::Tab;
@@ -33,6 +35,19 @@ impl Shortcut {
     pub fn is_list_key(self) -> bool {
         matches!(self, Shortcut::Up | Shortcut::Down | Shortcut::Expand | Shortcut::Collapse | Shortcut::Inspect)
     }
+}
+
+/// Whether a mapped shortcut may fire now: held keys only repeat for ↑ ↓, under a modal dialog
+/// only ⌘W works, and a Tab-focused widget keeps Return and the arrow keys for itself.
+pub fn allowed(sc: Shortcut, repeat: bool, modal: bool, widget_focused: bool) -> bool {
+    (!repeat || sc.repeats()) && (!modal || sc == Shortcut::CloseWindow) && !(sc.is_list_key() && widget_focused)
+}
+
+/// The selected process stays selected only while it is still listed under the highlighted app;
+/// otherwise the selection falls back to the app row.
+pub fn keep_sel_proc(app: Option<&str>, pid: Option<i32>, shown: &HashMap<String, Vec<i32>>) -> Option<i32> {
+    let (app, pid) = (app?, pid?);
+    shown.get(app).is_some_and(|v| v.contains(&pid)).then_some(pid)
 }
 
 /// Maps a key press to a shortcut. ⌘ combinations must not carry ⇧ or ⌃ (and ⌥ only for
@@ -216,6 +231,72 @@ mod tests {
         assert_eq!(cycle_tab(&vis, Tab::Cpu, 1), Some(Tab::Overview));
         assert_eq!(cycle_tab(&vis, Tab::Cpu, -1), Some(Tab::Settings));
         assert_eq!(cycle_tab(&[], Tab::Cpu, 1), None);
+    }
+
+    #[test]
+    fn allowed_gates_repeat_modal_and_focus() {
+        use Shortcut::*;
+        // Plain case: everything fires.
+        for sc in [Up, Down, Expand, Collapse, Inspect, Quit, ForceQuit, CloseWindow, NextTab, OpenSettings, TabNumber(0)] {
+            assert!(allowed(sc, false, false, false), "{sc:?}");
+        }
+        // Key repeat: only ↑ ↓.
+        assert!(allowed(Down, true, false, false));
+        assert!(allowed(Up, true, false, false));
+        assert!(!allowed(Inspect, true, false, false));
+        assert!(!allowed(Quit, true, false, false));
+        assert!(!allowed(ForceQuit, true, false, false));
+        assert!(!allowed(NextTab, true, false, false));
+        // Modal dialog: only ⌘W.
+        assert!(allowed(CloseWindow, false, true, false));
+        for sc in [Up, Down, Expand, Collapse, Inspect, Quit, ForceQuit, NextTab, PrevTab, OpenSettings, TabNumber(1)] {
+            assert!(!allowed(sc, false, true, false), "{sc:?}");
+        }
+        // A focused widget owns the list keys but not the ⌘ shortcuts.
+        for sc in [Up, Down, Expand, Collapse, Inspect] {
+            assert!(!allowed(sc, false, false, true), "{sc:?}");
+        }
+        for sc in [Quit, ForceQuit, NextTab, CloseWindow, OpenSettings, TabNumber(0)] {
+            assert!(allowed(sc, false, false, true), "{sc:?}");
+        }
+    }
+
+    #[test]
+    fn keep_sel_proc_drops_unlisted_processes() {
+        let shown: HashMap<String, Vec<i32>> = [("a".to_string(), vec![1, 2]), ("b".to_string(), vec![3])].into();
+        assert_eq!(keep_sel_proc(Some("a"), Some(2), &shown), Some(2));
+        // Process ended / beyond the 200-row limit.
+        assert_eq!(keep_sel_proc(Some("a"), Some(9), &shown), None);
+        // Another app was highlighted (tile click) while the pid belongs to the previous one.
+        assert_eq!(keep_sel_proc(Some("b"), Some(2), &shown), None);
+        // Collapsed or unlisted app.
+        assert_eq!(keep_sel_proc(Some("c"), Some(2), &shown), None);
+        assert_eq!(keep_sel_proc(None, Some(1), &shown), None);
+        assert_eq!(keep_sel_proc(Some("a"), None, &shown), None);
+    }
+
+    /// egui only fills `output.ime` for a focused TextEdit; `handle_shortcuts` relies on that to
+    /// stay quiet while the user types. This fails if an egui update changes it.
+    #[test]
+    fn text_edit_focus_sets_ime_output() {
+        let ctx = eframe::egui::Context::default();
+        let mut text = String::new();
+        let run = |ctx: &eframe::egui::Context, text: &mut String, focus: bool| {
+            // The window must report focus, or egui keeps the text cursor (and `ime`) off.
+            let raw = eframe::egui::RawInput { focused: true, ..Default::default() };
+            let out = ctx.run(raw, |ctx| {
+                eframe::egui::CentralPanel::default().show(ctx, |ui| {
+                    let r = ui.text_edit_singleline(text);
+                    if focus {
+                        r.request_focus();
+                    }
+                });
+            });
+            out.platform_output.ime.is_some()
+        };
+        assert!(!run(&ctx, &mut text, false), "no text field focused");
+        run(&ctx, &mut text, true);
+        assert!(run(&ctx, &mut text, false), "focused TextEdit must report ime");
     }
 
     fn app(k: &str) -> Row {

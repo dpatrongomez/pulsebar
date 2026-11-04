@@ -298,8 +298,8 @@ impl PulseApp {
                 });
             });
             ui.add_space(6.0);
-            // While the pointer is over the list, keep last frame's order: values keep updating,
-            // rows don't move. New apps appear once the pointer leaves.
+            // While the pointer is over the list (or after keyboard navigation), keep last frame's
+            // order: values keep updating, rows don't move. New apps appear once the pointer leaves.
             let top: Vec<&AppGroup> = match self.frozen.as_ref().filter(|f| f.metric == m) {
                 Some(f) => f.apps.iter().filter_map(|k| snap.apps.iter().find(|a| &a.key == k)).collect(),
                 None => snap.top_apps(m, n),
@@ -312,7 +312,7 @@ impl PulseApp {
                 // The focus ring marks the one selected row: the app itself, or one of its processes.
                 let selected_app = highlighted && self.sel_proc.is_none();
                 let open = *self.expanded.get(&a.key).unwrap_or(&false);
-                let (rect, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 58.0), egui::Sense::click());
+                let (rect, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 58.0), egui::Sense::CLICK);
                 // contains_pointer, not hovered: hovered() turns false while the pointer is on the
                 // row's own Quit buttons, which would hide them under the cursor.
                 let over_row = resp.contains_pointer();
@@ -403,7 +403,7 @@ impl PulseApp {
                     let (quit_tip, inspect_tip) = (self.i18n.t("quit") + "…", self.i18n.t("inspect"));
                     let font = egui::FontId::proportional(13.5);
                     for p in procs.iter().take(200) {
-                        let (rect, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 34.0), egui::Sense::click());
+                        let (rect, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 34.0), egui::Sense::CLICK);
                         let selected = highlighted && self.sel_proc == Some(p.pid);
                         resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, selected, p.name.clone()));
                         if resp.clicked() {
@@ -452,6 +452,8 @@ impl PulseApp {
                 }
             }
         });
+        // A selected process that is gone (or never belonged to the highlighted app) falls back to the app.
+        self.sel_proc = shortcuts::keep_sel_proc(self.highlight.as_deref(), self.sel_proc, &shown_procs);
         // Remember what is on screen so ↑ ↓ → ← can move through it.
         self.list_rows = shown_apps
             .iter()
@@ -461,7 +463,7 @@ impl PulseApp {
             })
             .collect();
         // A confirmation dialog on top of the list doesn't count as hovering it.
-        let over_list = ui.rect_contains_pointer(card.response.rect) && self.confirm.is_none() && action.is_none();
+        let over_list = (ui.rect_contains_pointer(card.response.rect) || self.key_nav_active()) && self.confirm.is_none() && action.is_none();
         self.frozen = over_list.then_some(FrozenOrder { metric: m, apps: shown_apps, procs: shown_procs });
         ui.add_space(14.0);
         if let Some(dark) = export {

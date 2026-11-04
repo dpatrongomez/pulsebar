@@ -142,10 +142,16 @@ pub struct PulseApp {
     last_nav_poll: Instant,
     expanded: HashMap<String, bool>,
     frozen: Option<FrozenOrder>,
+    /// Last ↑ ↓ → ← use: the list order stays frozen for a few seconds after it, even with the
+    /// pointer elsewhere.
+    last_key_nav: Option<Instant>,
     started: Option<Instant>,
     screenshot_requested: bool,
     series_cache: HashMap<String, (Instant, Vec<f64>)>,
 }
+
+/// How long the app list keeps its order after the last keyboard navigation.
+const KEY_NAV_FREEZE: Duration = Duration::from_secs(5);
 
 /// Row order of the app list while the pointer is over it. Without this a refresh can re-rank
 /// the list between hover and click and slide another app's Quit button under the cursor
@@ -185,6 +191,7 @@ impl PulseApp {
             last_nav_poll: Instant::now(),
             expanded: HashMap::new(),
             frozen: None,
+            last_key_nav: None,
             started: None,
             screenshot_requested: false,
             series_cache: HashMap::new(),
@@ -286,6 +293,12 @@ impl PulseApp {
             }
         }
         self.scroll_to_sel = true;
+        self.last_key_nav = Some(Instant::now());
+    }
+
+    /// Keyboard navigation happened recently enough to keep the rows where they are.
+    fn key_nav_active(&self) -> bool {
+        self.last_key_nav.is_some_and(|t| t.elapsed() < KEY_NAV_FREEZE)
     }
 
     fn selected_row(&self) -> Option<Row> {
@@ -314,11 +327,7 @@ impl PulseApp {
         for e in events {
             let egui::Event::Key { key, pressed: true, repeat, modifiers, .. } = e else { continue };
             let Some(sc) = shortcuts::map(key, modifiers) else { continue };
-            if (repeat && !sc.repeats()) || (modal && sc != Shortcut::CloseWindow) {
-                continue;
-            }
-            // A Tab-focused button owns Return and the arrow keys.
-            if sc.is_list_key() && widget_focused {
+            if !shortcuts::allowed(sc, repeat, modal, widget_focused) {
                 continue;
             }
             let visible: Vec<Tab> = self.settings.tabs.iter().filter(|t| t.visible).map(|t| t.tab).collect();
@@ -340,6 +349,7 @@ impl PulseApp {
                         ListEffect::Select(r) => self.select_row(&r),
                         ListEffect::SetExpanded(k, open) => {
                             self.expanded.insert(k, open);
+                            self.last_key_nav = Some(Instant::now());
                         }
                         ListEffect::Nothing => continue,
                     }
@@ -348,6 +358,9 @@ impl PulseApp {
                     let Some(row) = self.selected_row().filter(|r| self.list_rows.contains(r)) else { continue };
                     let mode = if sc == Shortcut::ForceQuit { Mode::ForceQuit } else { Mode::Quit };
                     match (sc, row) {
+                        // Force Quit is for apps only: the mouse offers no Force Quit on a process
+                        // row, and the System group would otherwise be reachable with SIGKILL.
+                        (Shortcut::ForceQuit, Row::Proc { .. }) => continue,
                         (Shortcut::Inspect, Row::Proc { pid, .. }) => self.open_inspector(snap, pid),
                         (Shortcut::Inspect, Row::App(k)) => {
                             // An app has no single process: inspect its biggest one.

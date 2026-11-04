@@ -1,8 +1,10 @@
 //! User settings (JSON in Application Support). Layout survives restarts.
 
 use crate::paths;
+use crate::sorting::ListSort;
 use crate::units::Units;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -221,6 +223,22 @@ pub struct Settings {
     pub alert_network_bps: f64,
     pub notifications: bool,
     pub plans: Vec<PlanConfig>,
+    /// Per-tab list sorting and optional columns; tabs without an entry use their default.
+    #[serde(deserialize_with = "lenient_list_sort")]
+    pub list_sort: HashMap<Tab, ListSort>,
+}
+
+/// Drops invalid `list_sort` entries (unknown tab or key, wrong type, missing field) instead of
+/// failing the whole `Settings` parse, which would reset every setting to its default.
+fn lenient_list_sort<'de, D: serde::Deserializer<'de>>(d: D) -> Result<HashMap<Tab, ListSort>, D::Error> {
+    let serde_json::Value::Object(map) = serde_json::Value::deserialize(d)? else { return Ok(HashMap::new()) };
+    Ok(map
+        .into_iter()
+        .filter_map(|(k, v)| {
+            let tab = serde_json::from_value(serde_json::Value::String(k)).ok()?;
+            Some((tab, serde_json::from_value(v).ok()?))
+        })
+        .collect())
 }
 
 impl Default for Settings {
@@ -259,6 +277,7 @@ impl Default for Settings {
                     manual_resets_at: None,
                 },
             ],
+            list_sort: HashMap::new(),
         }
     }
 }
@@ -352,6 +371,7 @@ impl Settings {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sorting::{SortKey, SortSpec};
 
     #[test]
     fn layout_roundtrip_preserves_order() {
@@ -366,6 +386,46 @@ mod tests {
         let visible: Vec<_> = back.menubar.iter().filter(|i| i.visible).map(|i| i.metric).collect();
         assert_eq!(visible, vec![MenuMetric::Memory, MenuMetric::Cpu]);
         assert!(!back.mcp_enabled, "MCP must be off by default");
+    }
+
+    #[test]
+    fn list_sort_roundtrips_per_tab() {
+        let mut s = Settings::default();
+        s.list_sort.insert(Tab::Cpu, ListSort { apps: Some(SortSpec { key: SortKey::Name, desc: false }), procs: Some(SortSpec { key: SortKey::Pid, desc: true }), extra_columns: true });
+        s.list_sort.insert(Tab::Memory, ListSort { procs: Some(SortSpec { key: SortKey::Energy, desc: false }), ..Default::default() });
+        let json = serde_json::to_string_pretty(&s).unwrap();
+        assert!(json.contains("\"cpu\""), "tabs serialise as snake_case keys: {json}");
+        let back: Settings = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.list_sort, s.list_sort);
+        assert_eq!(back, s);
+    }
+
+    #[test]
+    fn old_settings_without_list_sort_still_load() {
+        let s: Settings = serde_json::from_str(r#"{"compact":true,"theme":"brand"}"#).unwrap();
+        assert!(s.compact);
+        assert!(s.list_sort.is_empty());
+        // A partially specified entry fills the rest from defaults.
+        let s: Settings = serde_json::from_str(r#"{"list_sort":{"memory":{"extra_columns":true}}}"#).unwrap();
+        let m = &s.list_sort[&Tab::Memory];
+        assert!(m.extra_columns && m.apps.is_none() && m.procs.is_none());
+    }
+
+    #[test]
+    fn invalid_list_sort_entries_are_dropped_not_fatal() {
+        let json = r#"{"compact":true,"list_sort":{
+            "cpu":{"apps":{"key":"gpu","desc":true}},
+            "memory":{"procs":{"key":"name"}},
+            "disk":{"apps":"oops"},
+            "bogus_tab":{"extra_columns":true},
+            "network":{"apps":{"key":"pid","desc":false},"extra_columns":true}}}"#;
+        let s: Settings = serde_json::from_str(json).expect("bad list_sort must not fail the whole file");
+        assert!(s.compact, "other settings survive");
+        assert_eq!(s.list_sort.len(), 1, "only the valid entry is kept: {:?}", s.list_sort);
+        assert_eq!(s.list_sort[&Tab::Network].apps, Some(SortSpec { key: SortKey::Pid, desc: false }));
+        // A list_sort that is not even an object is ignored too.
+        let s: Settings = serde_json::from_str(r#"{"compact":true,"list_sort":[1]}"#).unwrap();
+        assert!(s.compact && s.list_sort.is_empty());
     }
 
     #[test]

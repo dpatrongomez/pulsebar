@@ -36,6 +36,11 @@ const TABLE: &[Row] = &[
     ("cancel",         ["Cancel","Cancelar","Abbrechen","Annuler","Annulla","Annuleer","Cancelar","Avbryt","Скасувати","キャンセル","취소","取消"]),
     ("stop",           ["Stop…","Detener…","Stoppen…","Arrêter…","Ferma…","Stoppen…","Parar…","Stoppa…","Зупинити…","停止…","중지…","停止…"]),
     ("stop_all",       ["Stop All…","Detener todo…","Alle stoppen…","Tout arrêter…","Ferma tutto…","Alles stoppen…","Parar tudo…","Stoppa alla…","Зупинити все…","すべて停止…","모두 중지…","全部停止…"]),
+    ("col.name",      ["Name","Nombre","Name","Nom","Nome","Naam","Nome","Namn","Назва","名前","이름","名称"]),
+    ("col.process",   ["Process","Proceso","Prozess","Processus","Processo","Proces","Processo","Process","Процес","プロセス","프로세스","进程"]),
+    ("col.pid",       ["PID","PID","PID","PID","PID","PID","PID","PID","PID","PID","PID","PID"]),
+    ("col.energy",    ["Energy","Energía","Energie","Énergie","Energia","Energie","Energia","Energi","Енергія","エネルギー","에너지","能耗"]),
+    ("col.cpu_mem",   ["CPU & Memory","CPU y memoria","CPU & Speicher","CPU et mémoire","CPU e memoria","CPU & geheugen","CPU e memória","CPU och minne","ЦП і пам’ять","CPU とメモリ","CPU 및 메모리","CPU 和内存"]),
     ("reset_layout",   ["Reset layout","Restablecer diseño","Layout zurücksetzen","Réinitialiser la disposition","Ripristina layout","Indeling herstellen","Redefinir layout","Återställ layout","Скинути розкладку","レイアウトをリセット","레이아웃 재설정","重置布局"]),
 ];
 

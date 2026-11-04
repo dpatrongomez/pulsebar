@@ -44,28 +44,59 @@ pub fn num(settings: &Settings, s: impl Into<String>, size: f32) -> RichText {
     }
 }
 
-/// Line chart with min/max band for history buckets: (t, min, avg, max).
-pub fn history_chart(ui: &mut egui::Ui, pts: &[(i64, f64, f64, f64)], height: f32, color: Color32, fmt: &dyn Fn(f64) -> String) {
+/// Line chart with min/max band for history buckets: (t, min, avg, max). The time axis spans
+/// the first to the last point and the line is continuous.
+pub fn history_chart(ui: &mut egui::Ui, i18n: &crate::i18n::I18n, pts: &[(i64, f64, f64, f64)], height: f32, color: Color32, fmt: &dyn Fn(f64) -> String) {
+    let range = match (pts.first(), pts.last()) {
+        (Some(a), Some(b)) => (a.0, b.0),
+        _ => (0, 1),
+    };
+    history_chart_range(ui, i18n, pts, range, 0, height, color, fmt);
+}
+
+/// Like [`history_chart`], but the x axis covers `range` = (from, to) in seconds whatever data
+/// there is, so partial history looks partial. With `step_s > 0` the line is broken wherever two
+/// consecutive points are more than 1.5 steps apart (a gap with no data).
+#[allow(clippy::too_many_arguments)]
+pub fn history_chart_range(ui: &mut egui::Ui, i18n: &crate::i18n::I18n, pts: &[(i64, f64, f64, f64)], range: (i64, i64), step_s: i64, height: f32, color: Color32, fmt: &dyn Fn(f64) -> String) {
     let width = ui.available_width();
     let (resp, painter) = ui.allocate_painter(Vec2::new(width, height), Sense::hover());
+    // Charts scrolled out of view cost nothing.
+    if !ui.is_rect_visible(resp.rect) {
+        return;
+    }
     let r = resp.rect.shrink2(Vec2::new(4.0, 8.0));
     painter.rect_stroke(resp.rect, 6.0, Stroke::new(1.0, ui.visuals().widgets.noninteractive.bg_stroke.color), egui::StrokeKind::Inside);
     if pts.len() < 2 {
-        painter.text(r.center(), egui::Align2::CENTER_CENTER, "Not enough history yet", egui::FontId::proportional(14.0), ui.visuals().weak_text_color());
+        painter.text(r.center(), egui::Align2::CENTER_CENTER, i18n.t("hist.not_enough"), egui::FontId::proportional(14.0), ui.visuals().weak_text_color());
         return;
     }
-    let t0 = pts[0].0 as f64;
-    let t1 = pts[pts.len() - 1].0 as f64;
+    let (t0, t1) = (range.0 as f64, range.1 as f64);
     let hi = pts.iter().map(|p| p.3).fold(0.0, f64::max).max(1e-9) * 1.1;
-    let map = |t: i64, v: f64| Pos2::new(r.left() + r.width() * ((t as f64 - t0) / (t1 - t0).max(1.0)) as f32, r.bottom() - r.height() * (v / hi) as f32);
-    let mut band: Vec<Pos2> = pts.iter().map(|p| map(p.0, p.3)).collect();
-    band.extend(pts.iter().rev().map(|p| map(p.0, p.1)));
-    // Band as thin quads (polygon may be concave).
-    for w in pts.windows(2) {
-        let quad = vec![map(w[0].0, w[0].3), map(w[1].0, w[1].3), map(w[1].0, w[1].1), map(w[0].0, w[0].1)];
-        painter.add(egui::Shape::convex_polygon(quad, color.gamma_multiply(0.12), Stroke::NONE));
+    let map = |t: i64, v: f64| Pos2::new(r.left() + r.width() * (((t as f64 - t0) / (t1 - t0).max(1.0)).clamp(0.0, 1.0)) as f32, r.bottom() - r.height() * (v / hi) as f32);
+    // Split into runs of consecutive points.
+    let gap = (step_s as f64 * 1.5) as i64;
+    let mut runs: Vec<&[(i64, f64, f64, f64)]> = Vec::new();
+    let mut start = 0;
+    for i in 1..pts.len() {
+        if step_s > 0 && pts[i].0 - pts[i - 1].0 > gap {
+            runs.push(&pts[start..i]);
+            start = i;
+        }
     }
-    painter.add(egui::Shape::line(pts.iter().map(|p| map(p.0, p.2)).collect(), Stroke::new(1.8, color)));
+    runs.push(&pts[start..]);
+    for run in runs {
+        if run.len() == 1 {
+            painter.circle_filled(map(run[0].0, run[0].2), 1.8, color);
+            continue;
+        }
+        // Min/max band as thin quads (a polygon may be concave).
+        for w in run.windows(2) {
+            let quad = vec![map(w[0].0, w[0].3), map(w[1].0, w[1].3), map(w[1].0, w[1].1), map(w[0].0, w[0].1)];
+            painter.add(egui::Shape::convex_polygon(quad, color.gamma_multiply(0.12), Stroke::NONE));
+        }
+        painter.add(egui::Shape::line(run.iter().map(|p| map(p.0, p.2)).collect(), Stroke::new(1.8, color)));
+    }
     painter.text(r.left_top(), egui::Align2::LEFT_TOP, fmt(hi / 1.1), egui::FontId::proportional(11.0), ui.visuals().weak_text_color());
     if let Some(pos) = resp.hover_pos() {
         let frac = ((pos.x - r.left()) / r.width()).clamp(0.0, 1.0) as f64;
@@ -73,8 +104,8 @@ pub fn history_chart(ui: &mut egui::Ui, pts: &[(i64, f64, f64, f64)], height: f3
         if let Some(p) = pts.iter().min_by_key(|p| ((p.0 as f64 - t).abs()) as i64) {
             let x = map(p.0, 0.0).x;
             painter.line_segment([Pos2::new(x, r.top()), Pos2::new(x, r.bottom())], Stroke::new(1.0, ui.visuals().weak_text_color()));
-            let when = chrono::DateTime::from_timestamp(p.0, 0).map(|d| d.with_timezone(&chrono::Local).format("%b %d %H:%M").to_string()).unwrap_or_default();
-            resp.on_hover_text(format!("{when}\navg {}  min {}  max {}", fmt(p.2), fmt(p.1), fmt(p.3)));
+            let when = chrono::DateTime::from_timestamp(p.0, 0).map(|d| d.with_timezone(&chrono::Local).format(&i18n.t("hist.date_fmt")).to_string()).unwrap_or_default();
+            resp.on_hover_text(format!("{when}\n{}", i18n.tf("hist.tip", &[("avg", &fmt(p.2)), ("min", &fmt(p.1)), ("max", &fmt(p.3))])));
         }
     }
 }
@@ -228,13 +259,13 @@ pub fn donut(ui: &mut egui::Ui, diameter: f32, parts: &[(f64, Color32)], big: &s
 }
 
 /// Area chart for the hero cards: faint horizontal grid, gradient fill, 2 px line.
-pub fn area_chart(p: &egui::Painter, r: Rect, values: &[f64], color: Color32, max: Option<f64>, grid: Color32) {
+pub fn area_chart(p: &egui::Painter, r: Rect, values: &[f64], color: Color32, max: Option<f64>, grid: Color32, empty: &str) {
     for i in 0..4 {
         let y = r.top() + r.height() * i as f32 / 3.0;
         p.line_segment([Pos2::new(r.left(), y), Pos2::new(r.right(), y)], Stroke::new(1.0, grid.gamma_multiply(0.25)));
     }
     if values.len() < 2 {
-        p.text(r.center(), egui::Align2::CENTER_CENTER, "Collecting data…", egui::FontId::proportional(13.0), grid);
+        p.text(r.center(), egui::Align2::CENTER_CENTER, empty, egui::FontId::proportional(13.0), grid);
         return;
     }
     let hi = max.unwrap_or_else(|| values.iter().cloned().fold(0.0, f64::max) * 1.15).max(1e-9);
@@ -292,6 +323,8 @@ pub enum ActionIcon {
     MoveDown,
     /// Ring with an "i" — open the process inspector.
     Inspect,
+    /// Three bars — open the app's detail view with its history.
+    Details,
 }
 
 /// Round, frameless icon button for row actions. The glyph is weak until hovered, then
@@ -346,6 +379,11 @@ pub fn icon_button(ui: &mut egui::Ui, icon: ActionIcon, color: Color32, tip: &st
             p.circle_stroke(c, 7.0, Stroke::new(1.5, fg));
             p.line_segment([c + Vec2::new(0.0, -0.6), c + Vec2::new(0.0, 3.2)], stroke);
             p.circle_filled(c + Vec2::new(0.0, -3.2), 1.1, fg);
+        }
+        ActionIcon::Details => {
+            for (dx, h) in [(-4.5, 5.0), (0.0, 9.0), (4.5, 7.0)] {
+                p.line_segment([c + Vec2::new(dx, 5.0), c + Vec2::new(dx, 5.0 - h)], Stroke::new(2.4, fg));
+            }
         }
     }
     resp

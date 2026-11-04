@@ -9,6 +9,7 @@ use std::collections::{HashMap, VecDeque};
 
 use serde::{Deserialize, Serialize};
 
+use crate::i18n::I18n;
 use crate::model::{AlertKind, AlertRule, Snapshot};
 use crate::units::{format_bytes, format_duration};
 
@@ -27,8 +28,32 @@ pub struct Alert {
     /// App group key ("bundle:com.x") or "" for machine-wide alerts.
     pub app_key: String,
     pub app_name: String,
+    /// English text (CLI, MCP, alerts.json consumers).
     pub message: String,
     pub at: i64,
+    /// i18n key and `{name}` arguments the GUI and notifications use to say `message` in the
+    /// user's language. Empty for alerts written by older versions: `message` is shown then.
+    #[serde(default)]
+    pub key: String,
+    #[serde(default)]
+    pub args: Vec<(String, String)>,
+}
+
+impl Alert {
+    /// The message in `i18n`'s language.
+    pub fn text(&self, i18n: &I18n) -> String {
+        if self.key.is_empty() {
+            return self.message.clone();
+        }
+        // Everything but the app name is a number with a unit: give it the language's decimal sign.
+        let vals: Vec<String> = self.args.iter().map(|(k, v)| if k == "name" { v.clone() } else { i18n.num(v.as_str()) }).collect();
+        let args: Vec<(&str, &str)> = self.args.iter().zip(&vals).map(|((k, _), v)| (k.as_str(), v.as_str())).collect();
+        i18n.tf(&self.key, &args)
+    }
+}
+
+fn args(v: &[(&str, String)]) -> Vec<(String, String)> {
+    v.iter().map(|(k, x)| (k.to_string(), x.clone())).collect()
 }
 
 #[derive(Default)]
@@ -104,6 +129,13 @@ pub struct AlertEngine {
     fired: HashMap<(AlertKind, String), i64>,
     snoozed: HashMap<(AlertKind, String), i64>,
     pub cooldown_s: i64,
+}
+
+impl Alert {
+    /// Notification title: the app's name, or "Alert" (translated) for machine-wide alerts.
+    pub fn title(&self, i18n: &I18n) -> String {
+        if self.app_name.is_empty() { i18n.t("alert.title") } else { self.app_name.clone() }
+    }
 }
 
 impl AlertEngine {
@@ -187,6 +219,8 @@ impl AlertEngine {
                         app_name: String::new(),
                         message: format!("CPU averaged {avg:.0} % for the last {}", format_duration(r.duration_s)),
                         at: now,
+                        key: "alert.cpu".into(),
+                        args: args(&[("avg", format!("{avg:.0}")), ("dur", format_duration(r.duration_s))]),
                     });
                 }
             }
@@ -198,6 +232,8 @@ impl AlertEngine {
                     app_name: String::new(),
                     message: format!("Disk writes sustained at {}/s for {}", format_bytes(avg), format_duration(r.duration_s)),
                     at: now,
+                    key: "alert.disk".into(),
+                    args: args(&[("rate", format_bytes(avg)), ("dur", format_duration(r.duration_s))]),
                 });
             }
         if let Some(r) = self.rule(AlertKind::NetworkSustained)
@@ -208,6 +244,8 @@ impl AlertEngine {
                     app_name: String::new(),
                     message: format!("Network traffic sustained at {}/s for {}", format_bytes(avg), format_duration(r.duration_s)),
                     at: now,
+                    key: "alert.network".into(),
+                    args: args(&[("rate", format_bytes(avg)), ("dur", format_duration(r.duration_s))]),
                 });
             }
         if let Some(r) = self.rule(AlertKind::AppMemoryGrowth).cloned() {
@@ -224,6 +262,8 @@ impl AlertEngine {
                         app_name: name.clone(),
                         message: format!("{name} memory is growing {}/h (now {})", format_bytes(per_h), format_bytes(w.last().map(|p| p.1).unwrap_or(0.0))),
                         at: now,
+                        key: "alert.memory".into(),
+                        args: args(&[("name", name.clone()), ("rate", format_bytes(per_h)), ("now", format_bytes(w.last().map(|p| p.1).unwrap_or(0.0)))]),
                     });
                 }
             }
@@ -245,7 +285,18 @@ impl AlertEngine {
     }
 }
 
-/// Local notification (osascript; no network). Actions are offered in the app's alert banner.
+/// Notify about a fired alert: a native notification with actions (see `gui::notify`) when the
+/// app is bundled and the user allows it, otherwise the osascript fallback.
+pub fn notify_alert(a: &Alert, i18n: &I18n) {
+    #[cfg(all(feature = "gui", target_os = "macos"))]
+    if crate::gui::notify::deliver(a, i18n) {
+        return;
+    }
+    notify(&a.title(i18n), &a.text(i18n));
+}
+
+/// Fallback notification (osascript; no network), attributed to Script Editor. Actions are only
+/// offered in the app's alert banner.
 pub fn notify(title: &str, body: &str) {
     let esc = |s: &str| s.replace('\\', "\\\\").replace('"', "\\\"");
     let script = format!("display notification \"{}\" with title \"PulseBar\" subtitle \"{}\"", esc(body), esc(title));
@@ -286,6 +337,20 @@ mod tests {
             fired.extend(e.feed(t, if batch { 100.0 } else { 20.0 }, if batch { 500e6 } else { 1e6 }, 1e3, &apps));
         }
         assert!(fired.is_empty(), "false positives: {fired:?}");
+    }
+
+    #[test]
+    fn alert_text_is_localised_with_english_fallback() {
+        let mut e = engine();
+        let mut fired = vec![];
+        for t in 0..900 {
+            fired.extend(e.feed(t, 85.0, 0.0, 0.0, &[]));
+        }
+        let a = &fired[0];
+        assert_eq!(a.text(&I18n::english()), a.message);
+        assert!(a.text(&I18n::new(Some("es"))).starts_with("CPU al 85 % de media"), "{}", a.text(&I18n::new(Some("es"))));
+        let old = Alert { key: String::new(), args: vec![], ..a.clone() };
+        assert_eq!(old.text(&I18n::new(Some("es"))), old.message);
     }
 
     #[test]

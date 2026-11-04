@@ -5,6 +5,12 @@
 //! further capped by the user's retention choice. Samples are accumulated in memory per
 //! (level, bucket, app, metric) and flushed with a merge-upsert (n-weighted average), so
 //! flushing at any time is correct. Per-app series skip the 1 s level to bound the file size.
+//!
+//! Per-app series are stored under `app_<metric>` (cpu, memory, energy, disk, network) with the
+//! app's bundle id (or name) in the `app` column, for the busiest apps only (see
+//! `daemon::history_samples`). Alerts and restarts of those apps go to the `events` table.
+//! Schema changes are additive (`CREATE TABLE IF NOT EXISTS`, tracked in `PRAGMA user_version`),
+//! so databases written by older versions open unchanged.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -12,7 +18,11 @@ use std::path::Path;
 use anyhow::Result;
 use rusqlite::{Connection, params};
 
-use crate::model::{AlertKind, AlertRule, HistoryBucket};
+use crate::model::{AlertKind, AlertRule, AppGroup, HistoryBucket, Snapshot};
+
+/// Schema version stored in `PRAGMA user_version`. Databases from before versioning have 0
+/// (history + alert_rules); 2 = + events; 3 = + events.old_pid / events.new_pid.
+const SCHEMA_VERSION: i64 = 3;
 
 pub const LEVELS: [(i64, i64); 6] = [
     (1, 300),
@@ -59,6 +69,79 @@ pub struct Sample<'a> {
     pub value: f64,
 }
 
+/// Key under which an app's history is stored: bundle id, else the app's name.
+pub fn app_id(g: &AppGroup) -> String {
+    g.app.bundle_id.clone().unwrap_or_else(|| g.app.name.clone())
+}
+
+/// Something notable that happened to an app: an alert that fired or a restart.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct AppEvent {
+    pub ts: i64,
+    pub app: String,
+    /// "alert" | "restart"
+    pub kind: String,
+    /// Alert text. Empty for restarts that carry their pids (the UI formats those itself).
+    pub message: String,
+    /// Restarts only: the main pid before and after. `None` on rows from older versions.
+    pub old_pid: Option<i32>,
+    pub new_pid: Option<i32>,
+}
+
+/// An app that has to be absent this long (seconds) before the detector forgets its main pid.
+const RESTART_GRACE_S: i64 = 120;
+/// At most one restart event per app in this many seconds (guards against crash loops).
+const RESTART_COOLDOWN_S: i64 = 600;
+
+/// Highest value of an app metric in a period and when (start of the bucket) it happened.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Peak {
+    pub ts: i64,
+    pub value: f64,
+}
+
+/// Spots restarts: an app whose main process disappeared and was replaced by another one.
+/// Remembers each app's main pid and pid set for `RESTART_GRACE_S` after it was last seen, so
+/// a quit-and-relaunch that spans several (slow, background) samples is still detected.
+#[derive(Default)]
+pub struct RestartDetector {
+    /// app id → (main pid, pids, last seen)
+    last: HashMap<String, (i32, Vec<i32>, i64)>,
+    /// app id → time of the last reported restart
+    reported: HashMap<String, i64>,
+}
+
+impl RestartDetector {
+    /// `(app id, previous main pid, new main pid)` for every app that restarted since last call.
+    /// `now` is the snapshot time in seconds.
+    pub fn feed(&mut self, s: &Snapshot, now: i64) -> Vec<(String, i32, i32)> {
+        let mut out = Vec::new();
+        for g in &s.apps {
+            // Without a real main process `root_pid` is just the first process seen, which a
+            // short-lived helper can replace without the app having restarted.
+            if g.key == crate::grouping::SYSTEM_KEY || g.root_pid <= 0 || !g.root_is_main {
+                continue;
+            }
+            let id = app_id(g);
+            if let Some((old_root, old_pids, _)) = self.last.get(&id)
+                && *old_root != g.root_pid
+                && !g.pids.contains(old_root)
+                // Only if none of the old processes survived as the new main one (helpers that
+                // got promoted when the main process exits aren't a restart of the app).
+                && !old_pids.contains(&g.root_pid)
+                && self.reported.get(&id).is_none_or(|t| now - t >= RESTART_COOLDOWN_S)
+            {
+                self.reported.insert(id.clone(), now);
+                out.push((id.clone(), *old_root, g.root_pid));
+            }
+            self.last.insert(id, (g.root_pid, g.pids.clone(), now));
+        }
+        self.last.retain(|_, v| now - v.2 < RESTART_GRACE_S);
+        self.reported.retain(|_, t| now - *t < RESTART_COOLDOWN_S);
+        out
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct RankRow {
     pub app: String,
@@ -91,8 +174,24 @@ impl History {
                 n INTEGER NOT NULL, PRIMARY KEY (res, metric, app, bucket)) WITHOUT ROWID;
              CREATE TABLE IF NOT EXISTS alert_rules (
                 kind TEXT PRIMARY KEY, threshold REAL NOT NULL, duration_s INTEGER NOT NULL,
-                enabled INTEGER NOT NULL);",
+                enabled INTEGER NOT NULL);
+             CREATE TABLE IF NOT EXISTS events (
+                ts INTEGER NOT NULL, app TEXT NOT NULL, kind TEXT NOT NULL, message TEXT NOT NULL,
+                old_pid INTEGER, new_pid INTEGER);
+             CREATE INDEX IF NOT EXISTS events_app_ts ON events (app, ts);",
         )?;
+        // Migrations are additive and idempotent: a missing events table is covered by the
+        // IF NOT EXISTS above, the pid columns of events written by earlier versions are added here.
+        for col in ["old_pid", "new_pid"] {
+            let have: bool = conn.query_row("SELECT COUNT(*) > 0 FROM pragma_table_info('events') WHERE name = ?1", params![col], |r| r.get(0))?;
+            if !have {
+                conn.execute_batch(&format!("ALTER TABLE events ADD COLUMN {col} INTEGER;"))?;
+            }
+        }
+        let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
+        if version < SCHEMA_VERSION {
+            conn.execute_batch(&format!("PRAGMA user_version = {SCHEMA_VERSION};"))?;
+        }
         Ok(Self { conn, pending: HashMap::new(), last_flush: 0, last_purge: 0 })
     }
 
@@ -152,6 +251,7 @@ impl History {
             let cutoff = now - keep.min(retention_s.max(300));
             n += self.conn.execute("DELETE FROM history WHERE res = ?1 AND bucket < ?2", params![res, cutoff])?;
         }
+        n += self.conn.execute("DELETE FROM events WHERE ts < ?1", params![now - retention_s.max(300)])?;
         Ok(n)
     }
 
@@ -179,6 +279,40 @@ impl History {
                 value_max: r.get(3)?,
                 samples: r.get(4)?,
             })
+        })?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
+    /// Highest recorded value of `metric` for one app in [from, to] and the bucket it was in.
+    pub fn app_peak(&self, metric: &str, app: &str, from: i64, to: i64, now: i64) -> Result<Option<Peak>> {
+        let res = Self::resolution_for(now, from);
+        let r = self.conn.query_row(
+            "SELECT bucket, vmax FROM history WHERE res = ?1 AND metric = ?2 AND app = ?3 AND bucket >= ?4 AND bucket <= ?5
+             ORDER BY vmax DESC, bucket DESC LIMIT 1",
+            params![res, metric, app, from - from.rem_euclid(res), to],
+            |r| Ok(Peak { ts: r.get(0)?, value: r.get(1)? }),
+        );
+        match r {
+            Ok(p) => Ok(Some(p)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    pub fn record_event(&self, e: &AppEvent) -> Result<()> {
+        self.conn.execute("INSERT INTO events (ts, app, kind, message, old_pid, new_pid) VALUES (?1,?2,?3,?4,?5,?6)",
+            params![e.ts, e.app, e.kind, e.message, e.old_pid, e.new_pid],
+        )?;
+        Ok(())
+    }
+
+    /// Events of one app in [from, to], newest first.
+    pub fn events(&self, app: &str, from: i64, to: i64, limit: usize) -> Result<Vec<AppEvent>> {
+        let mut st = self.conn.prepare_cached(
+            "SELECT ts, app, kind, message, old_pid, new_pid FROM events WHERE app = ?1 AND ts >= ?2 AND ts <= ?3 ORDER BY ts DESC LIMIT ?4",
+        )?;
+        let rows = st.query_map(params![app, from, to, limit as i64], |r| {
+            Ok(AppEvent { ts: r.get(0)?, app: r.get(1)?, kind: r.get(2)?, message: r.get(3)?, old_pid: r.get(4)?, new_pid: r.get(5)? })
         })?;
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
     }
@@ -325,6 +459,191 @@ mod tests {
         let total = h.total_since("net_down", t0, t0 + 3600).unwrap();
         assert!((total - 600e6).abs() < 1.0, "{total}");
         assert_eq!(h.total_since("disk_write", t0, t0 + 3600).unwrap(), 0.0);
+    }
+
+    #[test]
+    fn per_app_series_peak_and_events() {
+        let mut h = History::open_in_memory().unwrap();
+        let t0 = 1_800_000_000;
+        // 26 h of one app's CPU and memory, one sample every 10 s; CPU spikes once.
+        for i in 0..(26 * 360) {
+            let ts = t0 + i * 10;
+            let cpu = if i == 5000 { 250.0 } else { 10.0 };
+            h.record(ts, &[
+                Sample { app: Some("com.brave.Browser"), metric: "app_cpu", value: cpu },
+                Sample { app: Some("com.brave.Browser"), metric: "app_memory", value: 1e9 + i as f64 },
+                Sample { app: Some("com.other"), metric: "app_cpu", value: 1.0 },
+            ]);
+            if i % 360 == 0 {
+                h.flush().unwrap();
+            }
+        }
+        h.flush().unwrap();
+        let now = t0 + 26 * 3600;
+        // 24 h → 1-minute level: 1440 buckets of app-only data, other apps not mixed in.
+        let s = h.series("app_cpu", Some("com.brave.Browser"), now - 86_400, now, now).unwrap();
+        assert_eq!(s.len(), 1440);
+        assert!(s.iter().all(|b| b.resolution_s == 60 && b.app_bundle_id.as_deref() == Some("com.brave.Browser")));
+        let mem = h.series("app_memory", Some("com.brave.Browser"), now - 86_400, now, now).unwrap();
+        assert_eq!(mem.len(), 1440);
+        assert!(mem.windows(2).all(|w| w[1].value_avg > w[0].value_avg));
+        // 1 h and 7 d ranges pick 1 min and 5 min levels.
+        assert_eq!(h.series("app_cpu", Some("com.brave.Browser"), now - 3600, now, now).unwrap().len(), 60);
+        let week = h.series("app_cpu", Some("com.brave.Browser"), now - 7 * 86_400, now, now).unwrap();
+        assert_eq!(week[0].resolution_s, 300);
+        assert_eq!(week.len(), 26 * 12);
+        // Peak with timestamp (bucket start of sample 5000).
+        let p = h.app_peak("app_cpu", "com.brave.Browser", now - 86_400, now, now).unwrap().unwrap();
+        assert_eq!(p.value, 250.0);
+        let ts = t0 + 5000 * 10;
+        assert_eq!(p.ts, ts - ts.rem_euclid(60));
+        assert_eq!(h.app_peak("app_cpu", "com.nobody", now - 86_400, now, now).unwrap(), None);
+        // Events: newest first, filtered by app and range, purged with retention.
+        for (ts, app, kind) in [(now - 7200, "com.brave.Browser", "alert"), (now - 100, "com.brave.Browser", "restart"), (now - 50, "com.other", "alert")] {
+            h.record_event(&AppEvent { ts, app: app.into(), kind: kind.into(), message: "m".into(), ..Default::default() }).unwrap();
+        }
+        let ev = h.events("com.brave.Browser", now - 86_400, now, 10).unwrap();
+        assert_eq!(ev.iter().map(|e| e.kind.as_str()).collect::<Vec<_>>(), vec!["restart", "alert"]);
+        assert_eq!(h.events("com.brave.Browser", now - 3600, now, 10).unwrap().len(), 1);
+        h.purge(now, 3600).unwrap();
+        assert_eq!(h.events("com.brave.Browser", 0, now, 10).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn opens_v1_database_and_migrates() {
+        let dir = std::env::temp_dir().join(format!("pulsebar-mig-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("h.sqlite");
+        let _ = std::fs::remove_file(&path);
+        {
+            // A v1 file: history + alert_rules only, user_version 0, with one row in it.
+            let c = Connection::open(&path).unwrap();
+            c.execute_batch(
+                "CREATE TABLE history (res INTEGER NOT NULL, bucket INTEGER NOT NULL, app TEXT NOT NULL DEFAULT '',
+                    metric TEXT NOT NULL, vmin REAL NOT NULL, vavg REAL NOT NULL, vmax REAL NOT NULL,
+                    n INTEGER NOT NULL, PRIMARY KEY (res, metric, app, bucket)) WITHOUT ROWID;
+                 CREATE TABLE alert_rules (kind TEXT PRIMARY KEY, threshold REAL NOT NULL, duration_s INTEGER NOT NULL, enabled INTEGER NOT NULL);
+                 INSERT INTO history VALUES (60, 1799999940, 'com.x', 'app_cpu', 1, 2, 3, 4);",
+            )
+            .unwrap();
+        }
+        let h = History::open(&path).unwrap();
+        assert_eq!(h.row_count().unwrap(), 1);
+        assert_eq!(h.series("app_cpu", Some("com.x"), 1_799_999_000, 1_800_000_000, 1_800_000_000).unwrap().len(), 1);
+        h.record_event(&AppEvent { ts: 1_800_000_000, app: "com.x".into(), kind: "restart".into(), old_pid: Some(1), new_pid: Some(2), ..Default::default() }).unwrap();
+        let ev = h.events("com.x", 0, 2_000_000_000, 5).unwrap();
+        assert_eq!((ev.len(), ev[0].old_pid, ev[0].new_pid), (1, Some(1), Some(2)));
+        let v: i64 = h.conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+        assert_eq!(v, SCHEMA_VERSION);
+        drop(h);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn restart_detection() {
+        let group = |root: i32, pids: Vec<i32>| AppGroup {
+            key: "bundle:com.x".into(),
+            app: crate::model::App { bundle_id: Some("com.x".into()), name: "X".into(), ..Default::default() },
+            root_pid: root,
+            root_is_main: true,
+            pids,
+            ..Default::default()
+        };
+        let snap = |g: AppGroup| Snapshot { apps: vec![g], ..Default::default() };
+        let mut d = RestartDetector::default();
+        let t = 1_000_000;
+        assert!(d.feed(&snap(group(10, vec![10, 11])), t).is_empty()); // first sight
+        assert!(d.feed(&snap(group(10, vec![10, 11, 12])), t + 2).is_empty()); // helper spawned
+        // Quit and relaunched between ticks: new main pid, old pids gone.
+        assert_eq!(d.feed(&snap(group(20, vec![20, 21])), t + 4), vec![("com.x".to_string(), 10, 20)]);
+        assert!(d.feed(&snap(group(20, vec![20, 21])), t + 6).is_empty());
+        // Main exits but a surviving helper becomes the root: not a restart.
+        assert!(d.feed(&snap(group(21, vec![21])), t + 8).is_empty());
+    }
+
+    #[test]
+    fn restart_detection_grace_window_and_cooldown() {
+        let group = |root: i32| AppGroup {
+            key: "bundle:com.x".into(),
+            app: crate::model::App { bundle_id: Some("com.x".into()), name: "X".into(), ..Default::default() },
+            root_pid: root,
+            root_is_main: true,
+            pids: vec![root],
+            ..Default::default()
+        };
+        let snap = |g: AppGroup| Snapshot { apps: vec![g], ..Default::default() };
+        let gone = Snapshot::default();
+        let mut d = RestartDetector::default();
+        let t = 1_000_000;
+        d.feed(&snap(group(10)), t);
+        // Absent for a few samples (slow background refresh), back within the grace window
+        // with another pid: a restart.
+        assert!(d.feed(&gone, t + 6).is_empty());
+        assert!(d.feed(&gone, t + 12).is_empty());
+        assert_eq!(d.feed(&snap(group(20)), t + 18), vec![("com.x".to_string(), 10, 20)]);
+        // Crash loop: further restarts within the cooldown are not reported again...
+        assert!(d.feed(&snap(group(30)), t + 24).is_empty());
+        assert!(d.feed(&snap(group(40)), t + 599).is_empty());
+        // ...but one after it is.
+        assert_eq!(d.feed(&snap(group(50)), t + 18 + 600), vec![("com.x".to_string(), 40, 50)]);
+        // Absent longer than the grace window: the old pid is forgotten, no event.
+        assert!(d.feed(&gone, t + 2000).is_empty());
+        assert!(d.feed(&gone, t + 2100).is_empty());
+        assert!(d.feed(&snap(group(60)), t + 2200).is_empty());
+    }
+
+    /// A group without a real main process (`root_pid` is just the first process seen) never
+    /// produces restart events.
+    #[test]
+    fn restart_detection_needs_a_main_process() {
+        let group = |root: i32| AppGroup {
+            key: "bundle:com.x".into(),
+            app: crate::model::App { bundle_id: Some("com.x".into()), name: "X".into(), ..Default::default() },
+            root_pid: root,
+            root_is_main: false,
+            pids: vec![root, 99],
+            ..Default::default()
+        };
+        let snap = |g: AppGroup| Snapshot { apps: vec![g], ..Default::default() };
+        let mut d = RestartDetector::default();
+        d.feed(&snap(group(10)), 1000);
+        assert!(d.feed(&snap(group(20)), 1002).is_empty());
+    }
+
+    /// An events table written by the previous schema (no pid columns) gains them, and opening
+    /// the file again changes nothing.
+    #[test]
+    fn migrates_events_without_pid_columns() {
+        let dir = std::env::temp_dir().join(format!("pulsebar-mig2-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("h.sqlite");
+        let _ = std::fs::remove_file(&path);
+        {
+            let c = Connection::open(&path).unwrap();
+            c.execute_batch(
+                "CREATE TABLE events (ts INTEGER NOT NULL, app TEXT NOT NULL, kind TEXT NOT NULL, message TEXT NOT NULL);
+                 INSERT INTO events VALUES (1800000000, 'com.x', 'restart', 'X restarted (main pid 1 → 2)');
+                 PRAGMA user_version = 2;",
+            )
+            .unwrap();
+        }
+        for i in 0..2 {
+            let h = History::open(&path).unwrap();
+            let ev = h.events("com.x", 0, 2_000_000_000, 5).unwrap();
+            assert_eq!(ev.len(), 1 + i);
+            assert_eq!((ev.last().unwrap().old_pid, ev.last().unwrap().new_pid), (None, None));
+            assert!(ev.last().unwrap().message.contains("restarted"));
+            if i == 1 {
+                continue;
+            }
+            h.record_event(&AppEvent { ts: 1_800_000_100, app: "com.x".into(), kind: "restart".into(), old_pid: Some(2), new_pid: Some(3), ..Default::default() }).unwrap();
+        }
+        let h = History::open(&path).unwrap();
+        let ev = h.events("com.x", 0, 2_000_000_000, 5).unwrap();
+        assert_eq!(ev.len(), 2);
+        assert_eq!((ev[0].old_pid, ev[0].new_pid), (Some(2), Some(3)));
+        drop(h);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

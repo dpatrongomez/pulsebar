@@ -7,9 +7,10 @@ use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand, ValueEnum};
 
 use crate::actions::{self, HumanYes, Mode, Target};
+use crate::i18n::I18n;
 use crate::model::{RankMetric, Snapshot};
 use crate::settings::Settings;
-use crate::units::{DataUnit, TempUnit};
+use crate::units::{DataUnit, TempUnit, Units};
 use crate::{history, live, login_item, output, paths, projects, sampler, share_card, sys, views};
 
 #[derive(Parser, Debug)]
@@ -56,6 +57,9 @@ pub enum Command {
         tab: String,
         #[arg(long)]
         app: Option<String>,
+        /// Also ask to quit `--app` (opens the confirmation dialog).
+        #[arg(long)]
+        quit: bool,
     },
     /// Machine summary.
     Status,
@@ -330,7 +334,7 @@ pub fn run(cli: Cli) -> Result<()> {
         Command::Card { metric, dark } => {
             let s = snapshot(&settings);
             let m: RankMetric = metric.into();
-            let card = card_for(&s, m, &settings, dark);
+            let card = card_for_in(&I18n::english(), &settings.units, &s, m, dark);
             let path = share_card::export(&card, &paths::exports_dir(), &format!("pulsebar-{}", m.as_str()))?;
             println!("{}", path.display());
         }
@@ -373,25 +377,28 @@ pub fn run(cli: Cli) -> Result<()> {
     Ok(())
 }
 
-/// Summarised share card for a ranking.
-pub fn card_for(s: &Snapshot, m: RankMetric, settings: &Settings, dark: bool) -> share_card::Card {
-    let u = settings.units;
+/// Summarised share card for a ranking, worded in `i18n`'s language with `u`'s number format.
+/// The CLI passes `I18n::english()` and `settings.units`, which is what it always printed.
+pub fn card_for_in(i18n: &I18n, u: &Units, s: &Snapshot, m: RankMetric, dark: bool) -> share_card::Card {
     let cores = s.machine.cpu.core_count;
     let top = s.top_apps(m, 5);
     let (title, headline) = match m {
-        RankMetric::Memory => ("Memory by App", u.bytes(s.machine.memory.used)),
-        RankMetric::Cpu => ("CPU by App", u.cpu(s.machine.cpu.total_pct, cores)),
-        RankMetric::Energy => ("Energy by App", s.machine.power.system_w.map(|w| format!("{w:.1} W")).unwrap_or("—".into())),
-        RankMetric::Disk => ("Disk by App", u.rate(s.machine.disk.read_bps + s.machine.disk.write_bps)),
-        RankMetric::Network => ("Network by App", u.rate(s.machine.network.rx_bps + s.machine.network.tx_bps)),
+        RankMetric::Memory => ("card.memory", u.bytes(s.machine.memory.used)),
+        RankMetric::Cpu => ("card.cpu", u.cpu(s.machine.cpu.total_pct, cores)),
+        RankMetric::Energy => ("card.energy", s.machine.power.system_w.map(|w| u.watts(w, 1)).unwrap_or("—".into())),
+        RankMetric::Disk => ("card.disk", u.rate(s.machine.disk.read_bps + s.machine.disk.write_bps)),
+        RankMetric::Network => ("card.network", u.rate(s.machine.network.rx_bps + s.machine.network.tx_bps)),
     };
     share_card::Card {
-        title: title.into(),
+        title: i18n.t(title),
         headline,
-        subtitle: format!("{} processes → {} apps", s.processes.len(), s.apps.len()),
+        subtitle: i18n.tf(
+            "card.summary",
+            &[("processes", &i18n.tn("n.processes", s.processes.len(), &[])), ("apps", &i18n.tn("n.apps", s.apps.len(), &[]))],
+        ),
         rows: top
             .iter()
-            .map(|a| (a.app.name.clone(), output::metric_value(a, m, &u, cores), format!("{} processes", a.process_count)))
+            .map(|a| (a.app.name.clone(), output::metric_value(a, m, u, cores), i18n.tn("n.processes", a.process_count, &[])))
             .collect(),
         dark,
     }

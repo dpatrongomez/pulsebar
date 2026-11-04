@@ -16,8 +16,8 @@ use std::time::{Duration, Instant, SystemTime};
 use serde::{Deserialize, Serialize};
 
 use crate::alerts::{self, Alert, AlertEngine};
-use crate::history::{History, Sample};
-use crate::model::{AlertKind, MetricKind, RankMetric, Snapshot};
+use crate::history::{self, AppEvent, History, RestartDetector, Sample};
+use crate::model::{AlertKind, AppGroup, MetricKind, RankMetric, Snapshot};
 use crate::sampler::Engine;
 use crate::settings::Settings;
 use crate::{live, paths};
@@ -99,17 +99,39 @@ pub fn read_alerts() -> Vec<Alert> {
     read_json(&paths::alerts_file())
 }
 
+/// Run `f` holding an exclusive advisory lock on `.files.lock`, so the read-modify-write
+/// cycles of `alerts.json` and `snoozes.json` don't interleave between threads (the sampler and
+/// the notification callbacks) or processes (agent and window). Each call opens its own
+/// descriptor, which is what makes `flock` exclude other threads of this process too.
+///
+/// Not re-entrant: calling it again from inside `f` would block forever, so never nest.
+fn with_files_lock<R>(f: impl FnOnce() -> R) -> R {
+    use std::os::fd::AsRawFd;
+    let _ = paths::ensure_dirs();
+    let lock = std::fs::File::create(paths::app_support().join(".files.lock")).ok();
+    if let Some(l) = &lock {
+        // SAFETY: plain syscall on a descriptor that stays open until `lock` is dropped.
+        unsafe { libc::flock(l.as_raw_fd(), libc::LOCK_EX) };
+    }
+    f() // released when `lock` is dropped (closing the descriptor)
+}
+
 pub fn dismiss_alert(a: &Alert) {
-    let mut v = read_alerts();
-    v.retain(|x| !(x.kind == a.kind && x.app_key == a.app_key && x.at == a.at));
-    write_json(&paths::alerts_file(), &v);
+    with_files_lock(|| {
+        let mut v = read_alerts();
+        v.retain(|x| !(x.kind == a.kind && x.app_key == a.app_key && x.at == a.at));
+        write_json(&paths::alerts_file(), &v);
+    });
 }
 
 pub fn snooze_alert(a: &Alert, until: i64) {
-    let mut v: Vec<Snooze> = read_json(&paths::snoozes_file());
-    v.retain(|s| s.until > crate::sys::now_s());
-    v.push(Snooze { kind: a.kind, app_key: a.app_key.clone(), until });
-    write_json(&paths::snoozes_file(), &v);
+    with_files_lock(|| {
+        let mut v: Vec<Snooze> = read_json(&paths::snoozes_file());
+        v.retain(|s| s.until > crate::sys::now_s());
+        v.push(Snooze { kind: a.kind, app_key: a.app_key.clone(), until });
+        write_json(&paths::snoozes_file(), &v);
+    });
+    // The lock is released above: `dismiss_alert` takes it again and flock can't nest.
     dismiss_alert(a);
 }
 
@@ -143,17 +165,36 @@ pub fn spawn(settings: Settings, role: Role) -> Arc<Shared> {
     shared
 }
 
+/// Apps kept in history: the top N by each of CPU, memory, energy, disk and network.
+pub const TRACKED_PER_METRIC: usize = 15;
+
+/// Apps whose per-app series are written to history: those among the busiest by any metric.
+pub fn tracked_apps(s: &Snapshot) -> Vec<&AppGroup> {
+    let mut tracked: Vec<&AppGroup> = Vec::new();
+    for m in RankMetric::ALL {
+        // Idle apps (value 0) don't earn a place: they'd only fill the ranking by name.
+        for a in s.top_apps(m, TRACKED_PER_METRIC).into_iter().filter(|a| a.metric(m) > 0.0) {
+            if !tracked.iter().any(|t| t.key == a.key) {
+                tracked.push(a);
+            }
+        }
+    }
+    tracked
+}
+
 /// Metrics written to history per tick (whole machine) and per app.
 pub fn history_samples(s: &Snapshot) -> (Vec<(String, f64)>, Vec<(String, String, f64)>) {
     let mut machine: Vec<(String, f64)> = s.frames.iter().filter(|f| f.available).map(|f| (f.metric_kind.as_str().to_string(), f.value)).collect();
     // Separate series for the Overview's "Written today" / "Downloaded" totals.
     machine.push(("disk_write".into(), s.machine.disk.write_bps));
     machine.push(("net_down".into(), s.machine.network.rx_bps));
+    // Per-app series for every app that is among the busiest by any metric, so the app detail
+    // view has all five charts. Keys of the set are history ids (bundle id, else name).
     let mut apps = Vec::new();
-    for m in [RankMetric::Cpu, RankMetric::Memory, RankMetric::Energy] {
-        for a in s.top_apps(m, 15) {
-            let id = a.app.bundle_id.clone().unwrap_or_else(|| a.app.name.clone());
-            apps.push((id, format!("app_{}", m.as_str()), a.metric(m)));
+    for a in tracked_apps(s) {
+        let id = history::app_id(a);
+        for m in RankMetric::ALL {
+            apps.push((id.clone(), format!("app_{}", m.as_str()), a.metric(m)));
         }
     }
     (machine, apps)
@@ -173,6 +214,7 @@ fn run(sh: Arc<Shared>, settings: Settings) {
         }
         AlertEngine::new(rules)
     });
+    let mut restarts = RestartDetector::default();
     let mut last_live = Instant::now() - Duration::from_secs(60);
     let mut last_gc = Instant::now();
     let mut settings_mtime = mtime(&paths::settings_file());
@@ -201,6 +243,9 @@ fn run(sh: Arc<Shared>, settings: Settings) {
                 samples.extend(apps.iter().map(|(a, m, v)| Sample { app: Some(a), metric: m, value: *v }));
                 h.record(now, &samples);
                 let _ = h.maintain(now, st.retention.seconds(), 10);
+                for (id, old, new) in restarts.feed(&snap, now) {
+                    let _ = h.record_event(&AppEvent { ts: now, app: id, kind: "restart".into(), old_pid: Some(old), new_pid: Some(new), ..Default::default() });
+                }
             }
             let ae = alert_engine.as_mut().unwrap();
             let sm = mtime(&paths::snoozes_file());
@@ -212,18 +257,28 @@ fn run(sh: Arc<Shared>, settings: Settings) {
             }
             let fired = ae.feed_snapshot(&snap);
             if !fired.is_empty() {
-                if st.notifications {
-                    for a in &fired {
-                        alerts::notify(if a.app_name.is_empty() { "Alert" } else { &a.app_name }, &a.message);
+                if let Some(h) = sh.history.lock().unwrap().as_ref() {
+                    for a in fired.iter().filter(|a| !a.app_key.is_empty()) {
+                        if let Some(g) = snap.apps.iter().find(|g| g.key == a.app_key) {
+                            let _ = h.record_event(&AppEvent { ts: a.at, app: history::app_id(g), kind: "alert".into(), message: a.message.clone(), ..Default::default() });
+                        }
                     }
                 }
-                let mut all = read_alerts();
-                all.extend(fired);
-                let len = all.len();
-                if len > 50 {
-                    all.drain(..len - 50);
+                if st.notifications {
+                    let i18n = crate::i18n::I18n::new(st.language.as_deref());
+                    for a in &fired {
+                        alerts::notify_alert(a, &i18n);
+                    }
                 }
-                write_json(&paths::alerts_file(), &all);
+                with_files_lock(|| {
+                    let mut all = read_alerts();
+                    all.extend(fired);
+                    let len = all.len();
+                    if len > 50 {
+                        all.drain(..len - 50);
+                    }
+                    write_json(&paths::alerts_file(), &all);
+                });
             }
             if last_live.elapsed() >= Duration::from_secs(5) {
                 let _ = live::write(&snap);
@@ -250,5 +305,42 @@ fn run(sh: Arc<Shared>, settings: Settings) {
         let interval =
             if sh.foreground.load(Ordering::Relaxed) { st.sample_interval_ms.max(500) } else { st.background_interval_ms.max(1000) };
         std::thread::sleep(Duration::from_millis(interval).saturating_sub(start.elapsed()));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::{App, AppGroup};
+
+    fn app(name: &str, cpu: f64, mem: u64, net: f64) -> AppGroup {
+        AppGroup {
+            key: format!("name:{name}"),
+            app: App { name: name.into(), ..Default::default() },
+            cpu_pct: cpu,
+            mem_bytes: mem,
+            net_rx_bps: net,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn tracks_union_of_top_apps_with_all_metrics() {
+        // 20 apps; "Chatty" is only busy on the network, "Hog" only on CPU/memory.
+        let mut apps: Vec<AppGroup> = (0..20).map(|i| app(&format!("a{i}"), 1.0 + i as f64, 1000 * (i + 1) as u64, 0.0)).collect();
+        apps.push(app("Chatty", 0.0, 1, 9e9));
+        let s = Snapshot { apps, ..Default::default() };
+        let (_, rows) = history_samples(&s);
+        let ids: std::collections::BTreeSet<&str> = rows.iter().map(|r| r.0.as_str()).collect();
+        assert!(ids.contains("Chatty"), "top network app must be tracked");
+        assert!(ids.contains("a19") && !ids.contains("a0"));
+        // Every tracked app gets all five series.
+        for id in &ids {
+            let metrics: Vec<&str> = rows.iter().filter(|r| r.0 == *id).map(|r| r.1.as_str()).collect();
+            assert_eq!(metrics.len(), 5, "{id}: {metrics:?}");
+            assert!(metrics.contains(&"app_disk") && metrics.contains(&"app_network"));
+        }
+        let net = rows.iter().find(|r| r.0 == "Chatty" && r.1 == "app_network").unwrap();
+        assert_eq!(net.2, 9e9);
     }
 }

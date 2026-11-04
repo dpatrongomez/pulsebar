@@ -24,6 +24,7 @@ use crate::settings::{MenuDisplay, NumberFont, PlanConfig, Retention, Settings, 
 use crate::units::{CpuUnit, DataUnit, TempUnit, format_duration};
 use crate::{docker, limits, output, paths, projects, share_card, sys};
 
+mod sidebar;
 mod tabs;
 
 struct Stat {
@@ -267,6 +268,12 @@ impl PulseApp {
     // Tabs
     // ------------------------------------------------------------------------------------------
 
+    /// How many cards per row fit in `avail` (at least `min_w` wide, at most `max_cols`) and their width.
+    fn grid(avail: f32, gap: f32, min_w: f32, max_cols: usize) -> (usize, f32) {
+        let cols = (((avail + gap) / (min_w + gap)) as usize).clamp(1, max_cols);
+        (cols, ((avail - gap * (cols - 1) as f32) / cols as f32).floor().max(1.0))
+    }
+
     fn overview(&mut self, ui: &mut egui::Ui, snap: &Arc<Snapshot>) {
         let u = self.settings.units;
         let m = &snap.machine;
@@ -424,10 +431,10 @@ impl PulseApp {
         cards.push(self.agents_card(snap, now));
 
         let gap = 14.0;
-        let w4 = ((ui.available_width() - 3.0 * gap) / 4.0).floor().max(180.0);
         let card_h = 214.0;
+        let (cols4, w4) = Self::grid(ui.available_width(), gap, 180.0, 4);
         let mut go: Option<Tab> = None;
-        for row in cards.chunks(4) {
+        for row in cards.chunks(cols4) {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = gap;
                 for c in row {
@@ -440,7 +447,7 @@ impl PulseApp {
         }
 
         // Breakdown cards: memory by type, memory by app, power by app.
-        let w3 = ((ui.available_width() - 2.0 * gap) / 3.0).floor().max(240.0);
+        let (cols3, w3) = Self::grid(ui.available_width(), gap, 240.0, 3);
         let gray = if dark { Color32::from_gray(110) } else { Color32::from_gray(170) };
         let free_c = if dark { Color32::from_gray(60) } else { Color32::from_gray(215) };
         let by_type = Breakdown3 {
@@ -462,14 +469,17 @@ impl PulseApp {
         let by_app = self.app_breakdown(snap, RankMetric::Memory, "Memory by App", "⊞", mem_c, Tab::Memory, &|v| u.bytes(v as u64), gray);
         let pow_c = col(MetricKind::Battery);
         let by_power = self.app_breakdown(snap, RankMetric::Energy, "Power by App", "⚡", pow_c, Tab::Battery, &format_power, gray);
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = gap;
-            for b in [by_type, by_app, by_power] {
-                if self.breakdown_card(ui, Vec2::new(w3, 196.0), &b) {
-                    go = Some(b.tab);
+        for row in [by_type, by_app, by_power].chunks(cols3) {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = gap;
+                for b in row {
+                    if self.breakdown_card(ui, Vec2::new(w3, 196.0), b) {
+                        go = Some(b.tab);
+                    }
                 }
-            }
-        });
+            });
+            ui.add_space(gap - ui.spacing().item_spacing.y);
+        }
 
         if let Some(b) = projects::idle_banner(&snap.projects) {
             ui.add_space(10.0);
@@ -883,23 +893,41 @@ impl PulseApp {
         });
         Self::section(ui, "Tabs", "", |ui| {
             let mut mv: Option<(usize, usize)> = None;
-            let n = s.tabs.len();
             let i18n = I18n::new(s.language.as_deref());
-            for (i, t) in s.tabs.iter_mut().enumerate() {
-                if i > 0 {
-                    Self::settings_divider(ui);
+            // Same groups as the sidebar; order only matters (and can only change) within a group.
+            let mut first = true;
+            for (g, idx) in sidebar::grouped_indices(&s.tabs, false) {
+                if let Some(h) = g.header_key() {
+                    ui.add_space(if first { 0.0 } else { 8.0 });
+                    ui.label(RichText::new(i18n.t(h).to_uppercase()).size(10.5).strong().color(ui.visuals().weak_text_color()));
                 }
-                ui.horizontal(|ui| {
-                    let enabled = t.tab != Tab::Settings;
-                    let label = i18n.t(t.tab.key());
-                    Self::settings_cell(ui, 200.0, |ui| {
-                        changed |= ui.add_enabled(enabled, egui::Checkbox::new(&mut t.visible, label.clone())).changed();
-                    });
-                    if let Some(m) = Self::move_buttons(ui, i, n, &label) {
-                        mv = Some(m);
+                first = false;
+                let n = idx.len();
+                for (pos, &i) in idx.iter().enumerate() {
+                    if pos > 0 {
+                        Self::settings_divider(ui);
                     }
-                });
+                    let tab = s.tabs[i].tab;
+                    let label = i18n.t(tab.key());
+                    ui.horizontal(|ui| {
+                        Self::settings_cell(ui, 200.0, |ui| {
+                            changed |= ui.checkbox(&mut s.tabs[i].visible, label.clone()).changed();
+                        });
+                        if tab != Tab::History
+                            && let Some((a, b)) = Self::move_buttons(ui, pos, n, &label)
+                        {
+                            mv = Some((idx[a], idx[b]));
+                        }
+                    });
+                }
             }
+            // Settings is always shown and pinned last, so it has no checkbox state or move buttons.
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                Self::settings_cell(ui, 200.0, |ui| {
+                    ui.add_enabled(false, egui::Checkbox::new(&mut true, i18n.t(Tab::Settings.key())));
+                });
+            });
             if let Some((a, b)) = mv {
                 s.move_tab(a, b);
                 changed = true;
@@ -1223,30 +1251,7 @@ impl eframe::App for PulseApp {
             return;
         };
 
-        egui::TopBottomPanel::top("tabs").show_separator_line(false).show(ctx, |ui| {
-            ui.add_space(8.0);
-            let dark = ui.visuals().dark_mode;
-            let strip = if dark { Color32::from_rgb(28, 28, 31) } else { Color32::from_rgb(230, 230, 235) };
-            let accent = widgets::metric_color(self.settings.theme, dark, MetricKind::Cpu);
-            egui::Frame::new().fill(strip).corner_radius(12.0).inner_margin(4.0).show(ui, |ui| {
-                ui.horizontal_wrapped(|ui| {
-                    ui.spacing_mut().item_spacing.x = 2.0;
-                    let tabs = self.settings.tabs.clone();
-                    for t in tabs.iter().filter(|t| t.visible) {
-                        let selected = self.tab == t.tab;
-                        let text = RichText::new(format!("{}  {}", tab_glyph(t.tab), self.i18n.t(t.tab.key()))).size(13.0);
-                        let text = if selected { text.color(accent) } else { text };
-                        let fill = if selected { accent.gamma_multiply(0.18) } else { Color32::TRANSPARENT };
-                        let b = egui::Button::new(text).fill(fill).stroke(egui::Stroke::NONE).corner_radius(9.0).min_size(Vec2::new(0.0, 30.0));
-                        if ui.add(b).clicked() {
-                            self.tab = t.tab;
-                            self.highlight = None;
-                        }
-                    }
-                });
-            });
-            ui.add_space(6.0);
-        });
+        self.sidebar(ctx, &snap);
         if !self.toasts.is_empty() {
             egui::TopBottomPanel::bottom("toasts").show(ctx, |ui| {
                 for (_, t) in &self.toasts {

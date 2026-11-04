@@ -33,15 +33,32 @@ fn tab_for(kind: AlertKind) -> Tab {
     }
 }
 
-/// What a tap on the banner or one of its action buttons does. `action` is the response's
-/// action identifier (a plain click arrives as `ACT_SHOW`).
-fn perform(action: &str, a: &Alert) {
-    let app = (!a.app_key.is_empty()).then(|| a.app_key.clone());
+/// What a tap on the banner or one of its buttons should do, decided without side effects.
+#[derive(Debug, PartialEq)]
+enum Intent {
+    Snooze,
+    /// Open the window on `tab`; `quit` only opens the confirmation dialog, it never quits.
+    Open { tab: Tab, app: Option<String>, quit: bool },
+    Nothing,
+}
+
+/// `action` is the response's action identifier (a plain click arrives as `ACT_SHOW`).
+fn intent(action: &str, a: &Alert) -> Intent {
+    let open = |quit| Intent::Open { tab: tab_for(a.kind), app: (!a.app_key.is_empty()).then(|| a.app_key.clone()), quit };
     match action {
-        ACT_SNOOZE => crate::daemon::snooze_alert(a, crate::sys::now_s() + SNOOZE_S),
-        ACT_QUIT => super::open_window_with(tab_for(a.kind), app, true),
-        ACT_SHOW => super::open_window_with(tab_for(a.kind), app, false),
-        _ => {}
+        ACT_SNOOZE => Intent::Snooze,
+        ACT_QUIT => open(true),
+        ACT_SHOW => open(false),
+        _ => Intent::Nothing,
+    }
+}
+
+/// Carry out what [`intent`] decided.
+fn perform(action: &str, a: &Alert) {
+    match intent(action, a) {
+        Intent::Snooze => crate::daemon::snooze_alert(a, crate::sys::now_s() + SNOOZE_S),
+        Intent::Open { tab, app, quit } => super::open_window_with(tab, app, quit),
+        Intent::Nothing => {}
     }
 }
 
@@ -59,6 +76,7 @@ pub fn deliver(_: &Alert) -> bool {
 #[cfg(target_os = "macos")]
 mod mac {
     use std::ptr::NonNull;
+    use std::sync::atomic::{AtomicBool, Ordering};
 
     use block2::RcBlock;
     use objc2::rc::Retained;
@@ -81,6 +99,10 @@ mod mac {
     fn bundled() -> bool {
         NSBundle::mainBundle().bundleIdentifier().is_some()
     }
+
+    /// A single authorisation request in flight: while the user hasn't answered the prompt,
+    /// further alerts go through osascript instead of queueing their own request.
+    static AUTH_PENDING: AtomicBool = AtomicBool::new(false);
 
     fn ns(s: &str) -> Retained<NSString> {
         NSString::from_str(s)
@@ -174,7 +196,7 @@ mod mac {
     fn post(a: &Alert) {
         register_categories();
         let content = UNMutableNotificationContent::new();
-        let title = if a.app_name.is_empty() { "Alert" } else { &a.app_name };
+        let title = a.title();
         content.setTitle(&ns(title));
         content.setBody(&ns(&a.message));
         content.setSound(Some(&UNNotificationSound::defaultSound()));
@@ -210,8 +232,14 @@ mod mac {
             // SAFETY: the centre passes a live settings object for the duration of the call.
             let status = unsafe { settings.as_ref() }.authorizationStatus();
             if status == UNAuthorizationStatus::NotDetermined {
+                if AUTH_PENDING.swap(true, Ordering::SeqCst) {
+                    fallback(&alert);
+                    return;
+                }
                 let alert = alert.clone();
                 let granted = RcBlock::new(move |ok: Bool, _err: *mut NSError| {
+                    // Every completion (granted, denied or error) lands here first.
+                    AUTH_PENDING.store(false, Ordering::SeqCst);
                     if ok.as_bool() {
                         post(&alert);
                     } else {
@@ -231,7 +259,7 @@ mod mac {
     }
 
     fn fallback(a: &Alert) {
-        crate::alerts::notify(if a.app_name.is_empty() { "Alert" } else { &a.app_name }, &a.message);
+        crate::alerts::notify(a.title(), &a.message);
     }
 }
 
@@ -243,5 +271,35 @@ mod tests {
     fn alerts_open_the_matching_tab() {
         assert_eq!(tab_for(AlertKind::AppMemoryGrowth), Tab::Memory);
         assert_eq!(tab_for(AlertKind::CpuSustained), Tab::Cpu);
+    }
+
+    fn alert(app_key: &str) -> Alert {
+        Alert { kind: AlertKind::AppMemoryGrowth, app_key: app_key.into(), app_name: String::new(), message: "m".into(), at: 1 }
+    }
+
+    #[test]
+    fn quit_action_only_opens_the_dialog() {
+        let open = Intent::Open { tab: Tab::Memory, app: Some("bundle:x".into()), quit: true };
+        assert_eq!(intent(ACT_QUIT, &alert("bundle:x")), open);
+    }
+
+    #[test]
+    fn normal_click_equals_show() {
+        let a = alert("bundle:x");
+        assert_eq!(intent(ACT_SHOW, &a), Intent::Open { tab: Tab::Memory, app: Some("bundle:x".into()), quit: false });
+        // The delegate maps the default action to ACT_SHOW before calling `perform`.
+        assert_ne!(intent(ACT_SHOW, &a), intent(ACT_QUIT, &a));
+    }
+
+    #[test]
+    fn machine_alerts_have_no_app() {
+        assert_eq!(intent(ACT_SHOW, &alert("")), Intent::Open { tab: Tab::Memory, app: None, quit: false });
+    }
+
+    #[test]
+    fn snooze_and_unknown_actions() {
+        assert_eq!(intent(ACT_SNOOZE, &alert("bundle:x")), Intent::Snooze);
+        assert_eq!(intent("com.apple.UNNotificationDismissActionIdentifier", &alert("bundle:x")), Intent::Nothing);
+        assert_eq!(intent("", &alert("bundle:x")), Intent::Nothing);
     }
 }

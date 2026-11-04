@@ -106,6 +106,13 @@ pub struct AlertEngine {
     pub cooldown_s: i64,
 }
 
+impl Alert {
+    /// Notification title: the app's name, or "Alert" for machine-wide alerts.
+    pub fn title(&self) -> &str {
+        if self.app_name.is_empty() { "Alert" } else { &self.app_name }
+    }
+}
+
 impl AlertEngine {
     pub fn new(rules: Vec<AlertRule>) -> Self {
         Self {
@@ -252,7 +259,7 @@ pub fn notify_alert(a: &Alert) {
     if crate::gui::notify::deliver(a) {
         return;
     }
-    notify(if a.app_name.is_empty() { "Alert" } else { &a.app_name }, &a.message);
+    notify(a.title(), &a.message);
 }
 
 /// Fallback notification (osascript; no network), attributed to Script Editor. Actions are only

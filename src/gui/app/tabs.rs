@@ -103,16 +103,16 @@ fn sort_header(ui: &mut egui::Ui, id: impl std::hash::Hash, pos: egui::Pos2, rig
 const MIN_WIDTH_FOR_EXTRAS: f32 = 560.0;
 
 /// Text of the last numeric cell of a process row: Disk / Network rate, else Energy.
-fn last_proc_cell(p: &Process, key: SortKey, u: &crate::units::Units) -> String {
+fn last_proc_cell(i18n: &I18n, p: &Process, key: SortKey, u: &crate::units::Units) -> String {
     match key {
         SortKey::Disk => u.rate(p.disk_read_bps + p.disk_write_bps),
         SortKey::Network => u.rate(p.net_rx_bps + p.net_tx_bps),
-        _ => watts(Some(p.energy_w)),
+        _ => watts(i18n, Some(p.energy_w)),
     }
 }
 
-fn watts(v: Option<f64>) -> String {
-    v.map(|w| if w < 1.0 { format!("{:.0} mW", w * 1000.0) } else { format!("{w:.1} W") }).unwrap_or("—".into())
+fn watts(i18n: &I18n, v: Option<f64>) -> String {
+    v.map(|w| if w < 1.0 { format!("{:.0} mW", w * 1000.0) } else { i18n.num(format!("{w:.1} W")) }).unwrap_or("—".into())
 }
 
 impl PulseApp {
@@ -147,7 +147,7 @@ impl PulseApp {
         let stats = self.today_stats(h.metric);
         let history = self.hero_series(h.metric);
         let live = self.shared.sparks.read().unwrap().get(h.kind);
-        let (series, range_label) = if history.len() >= 10 { (history, "Last hour") } else { (live, "Last 2 minutes") };
+        let (series, range_label) = if history.len() >= 10 { (history, self.t("hero.last_hour")) } else { (live, self.t("hero.last_2min")) };
         let mut rows = vec![
             (self.i18n.t("avg_today"), stats.map(|s| (h.fmt)(s.0)).unwrap_or("—".into())),
             (self.i18n.t("peak"), stats.map(|s| (h.fmt)(s.1)).unwrap_or("—".into())),
@@ -190,8 +190,8 @@ impl PulseApp {
             }
         });
         let resp = ui.interact(chart, ui.id().with(("hero", h.metric)), egui::Sense::hover());
-        widgets::area_chart(ui.painter(), chart, &series, color, h.max, ui.visuals().weak_text_color());
-        ui.painter().text(chart.right_top() + Vec2::new(0.0, -6.0), egui::Align2::RIGHT_BOTTOM, range_label, egui::FontId::proportional(11.0), ui.visuals().weak_text_color());
+        widgets::area_chart(ui.painter(), chart, &series, color, h.max, ui.visuals().weak_text_color(), &self.t("collecting"));
+        ui.painter().text(chart.right_top() + Vec2::new(0.0, -6.0), egui::Align2::RIGHT_BOTTOM, &range_label, egui::FontId::proportional(11.0), ui.visuals().weak_text_color());
         if let Some(pos) = resp.hover_pos()
             && series.len() >= 2 {
                 let i = (((pos.x - chart.left()) / chart.width()).clamp(0.0, 1.0) * (series.len() - 1) as f32).round() as usize;
@@ -262,11 +262,12 @@ impl PulseApp {
 
     /// Tile for the busiest app by `m`; click scrolls the list to it.
     pub(super) fn top_app_tile(&self, snap: &Snapshot, m: RankMetric, label: &str) -> Tile {
-        let u = self.settings.units;
+        let u = self.units();
+        let label = self.t(label);
         match snap.top_apps(m, 1).into_iter().next() {
             Some(a) => Tile {
                 glyph: "⊞",
-                label: label.into(),
+                label,
                 value: a.app.name.clone(),
                 sub: TileSub::Text(output::metric_value(a, m, &u, snap.machine.cpu.core_count)),
                 bundle: a.app.bundle_path.clone(),
@@ -306,7 +307,7 @@ impl PulseApp {
     /// App list: icon, name, process count, value and a thin meter. Hover shows Quit / Force
     /// Quit; a click expands the processes. Both quits go through the confirmation dialog.
     pub(super) fn app_list(&mut self, ui: &mut egui::Ui, snap: &Arc<Snapshot>, m: RankMetric, n: usize, col: &str) {
-        let u = self.settings.units;
+        let u = self.units();
         let cores = snap.machine.cpu.core_count;
         let color = self.color(ui, match m {
             RankMetric::Cpu => MetricKind::Cpu,
@@ -346,14 +347,15 @@ impl PulseApp {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
                 ui.add_space(10.0);
-                ui.label(RichText::new("App").size(14.0).weak());
-                ui.label(RichText::new(format!("· {} processes in {} apps", snap.processes.len(), snap.apps.len())).size(12.0).weak());
+                ui.label(RichText::new(self.t("mem.app")).size(14.0).weak());
+                let summary = self.tf("applist.summary", &[("procs", &self.i18n.tn("n.processes", snap.processes.len(), &[])), ("apps", &self.i18n.tn("n.apps", snap.apps.len(), &[]))]);
+                ui.label(RichText::new(summary).size(12.0).weak());
                 ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
                     ui.add_space(10.0);
-                    if ui.add(egui::Button::new(RichText::new("Share (dark)").size(12.0)).frame(false)).on_hover_text("Export a dark share card (1200×630)").clicked() {
+                    if ui.add(egui::Button::new(RichText::new(self.t("share.dark")).size(12.0)).frame(false)).on_hover_text(self.t("share.dark_tip")).clicked() {
                         export = Some(true);
                     }
-                    if ui.add(egui::Button::new(RichText::new("Share (light)").size(12.0)).frame(false)).on_hover_text("Export a light share card (1200×630)").clicked() {
+                    if ui.add(egui::Button::new(RichText::new(self.t("share.light")).size(12.0)).frame(false)).on_hover_text(self.t("share.light_tip")).clicked() {
                         export = Some(false);
                     }
                     let mark = if ls.extra_columns { "☑" } else { "☐" };
@@ -377,7 +379,7 @@ impl PulseApp {
                     app_click = Some(*k);
                 }
             }
-            if sort_header(ui, "app-hdr-metric", egui::pos2(hin.right(), cy), true, col, m_key, app_sort) {
+            if sort_header(ui, "app-hdr-metric", egui::pos2(hin.right(), cy), true, &self.t(col), m_key, app_sort) {
                 app_click = Some(m_key);
             }
             ui.painter().hline(hin.x_range(), hdr.bottom(), egui::Stroke::new(1.0, ui.visuals().widgets.noninteractive.bg_stroke.color.gamma_multiply(0.6)));
@@ -433,7 +435,7 @@ impl PulseApp {
                         ui.spacing_mut().item_spacing.y = 1.0;
                         let name = RichText::new(&a.app.name).size(15.0).strong();
                         ui.add(egui::Label::new(if highlighted { name.color(color) } else { name.color(strong) }).truncate());
-                        let procs = if a.process_count == 1 { "1 process".to_string() } else { format!("{} processes", a.process_count) };
+                        let procs = self.i18n.tn("n.processes", a.process_count, &[]);
                         ui.label(RichText::new(procs).size(12.5).weak());
                     });
                     if (over_row || open || highlighted) && a.key != crate::grouping::SYSTEM_KEY {
@@ -500,7 +502,7 @@ impl PulseApp {
                         job.wrap = egui::text::TextWrapping { max_width: (cols[0] - 40.0 - name_x).max(20.0), max_rows: 1, break_anywhere: true, overflow_character: Some('…') };
                         let galley = ui.painter().layout_job(job);
                         ui.painter().galley(egui::pos2(name_x, cy - galley.size().y / 2.0), galley, text_col);
-                        let cells = [p.pid.to_string(), u.cpu(p.cpu_pct, cores), u.bytes(p.mem_bytes), last_proc_cell(p, last_proc_key, &u)];
+                        let cells = [p.pid.to_string(), u.cpu(p.cpu_pct, cores), u.bytes(p.mem_bytes), last_proc_cell(&self.i18n, p, last_proc_key, &u)];
                         for (i, (x, text)) in cols.iter().zip(cells).enumerate() {
                             ui.painter().text(egui::pos2(*x, cy), egui::Align2::RIGHT_CENTER, text, font.clone(), if i == 0 { weak } else { text_col });
                         }
@@ -546,10 +548,16 @@ impl PulseApp {
         }
         ui.add_space(14.0);
         if let Some(dark) = export {
-            let card = crate::cli::card_for(snap, m, &self.settings, dark);
+            let card = crate::cli::card_for_in(&self.i18n, &u, snap, m, dark);
             match share_card::export(&card, &paths::exports_dir(), &format!("pulsebar-{}", m.as_str())) {
-                Ok(p) => self.toast(format!("Saved {}", p.display())),
-                Err(e) => self.toast(format!("Export failed: {e}")),
+                Ok(p) => {
+                    let m = self.tf("saved", &[("path", &p.display().to_string())]);
+                    self.toast(m)
+                }
+                Err(e) => {
+                    let m = self.tf("export_failed", &[("err", &e.to_string())]);
+                    self.toast(m)
+                }
             }
         }
         if let Some((t, md)) = action {
@@ -582,7 +590,7 @@ impl PulseApp {
 
     pub(super) fn cpu(&mut self, ui: &mut egui::Ui, snap: &Arc<Snapshot>) {
         let c = snap.machine.cpu.clone();
-        let u = self.settings.units;
+        let u = self.units();
         let cores = c.core_count;
         let fmt = move |v: f64| u.cpu(v, cores);
         self.hero(ui, Hero {
@@ -591,19 +599,19 @@ impl PulseApp {
             caption: self.i18n.t("now"),
             value: u.cpu(c.total_pct, cores),
             badge: None,
-            rows: vec![("Load".into(), format!("{:.2}", c.load_avg[0]))],
+            rows: vec![(self.t("load"), self.i18n.num(format!("{:.2}", c.load_avg[0])))],
             max: Some(100.0),
             fmt: &fmt,
         });
         let chips = match sys::perf_levels() {
             Some((p, e)) if e > 0 => TileSub::Chips(vec![format!("{p} P"), format!("{e} E")]),
-            _ => TileSub::Text(format!("Load {:.2} · {:.2} · {:.2}", c.load_avg[0], c.load_avg[1], c.load_avg[2])),
+            _ => TileSub::Text(self.tf("tray.load", &[("a", &self.i18n.num(format!("{:.2}", c.load_avg[0]))), ("b", &self.i18n.num(format!("{:.2}", c.load_avg[1]))), ("c", &self.i18n.num(format!("{:.2}", c.load_avg[2])))])),
         };
         let tiles = vec![
-            Tile::text("▣", "User", u.cpu(c.user_pct, cores), "Your apps"),
-            Tile::text("▣", "System", u.cpu(c.system_pct, cores), "macOS"),
-            Tile::new("⚡", "Cores", cores.to_string(), chips),
-            self.top_app_tile(snap, RankMetric::Cpu, "Top App"),
+            Tile::text("▣", self.t("st.user"), u.cpu(c.user_pct, cores), self.t("tl.your_apps")),
+            Tile::text("▣", self.t("st.system"), u.cpu(c.system_pct, cores), "macOS"),
+            Tile::new("⚡", self.t("tl.cores"), cores.to_string(), chips),
+            self.top_app_tile(snap, RankMetric::Cpu, "tl.top_app"),
         ];
         self.tiles(ui, MetricKind::Cpu, tiles);
 
@@ -616,9 +624,9 @@ impl PulseApp {
             right.push_str(&format!("CPU {}", u.temp(t)));
         }
         for f in &sensors.fans {
-            right.push_str(&format!("   Fan {} · {:.0} rpm", f.index + 1, f.rpm));
+            right.push_str(&format!("   {}", self.tf("fan_rpm", &[("i", &(f.index + 1).to_string()), ("rpm", &format!("{:.0}", f.rpm))])));
         }
-        Self::section(ui, "Per Core", right.trim(), |ui| {
+        Self::section(ui, &self.t("sec.per_core"), right.trim(), |ui| {
             let n = c.per_core.len().max(1);
             let h = 70.0;
             let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), h + 18.0), egui::Sense::hover());
@@ -634,47 +642,47 @@ impl PulseApp {
                 ui.painter().text(egui::pos2(x + bar_w / 2.0, rect.bottom()), egui::Align2::CENTER_BOTTOM, format!("{:.0}", v), egui::FontId::proportional(10.5), ui.visuals().weak_text_color());
             }
         });
-        self.app_list(ui, snap, RankMetric::Cpu, 25, "CPU");
+        self.app_list(ui, snap, RankMetric::Cpu, 25, "tab.cpu");
     }
 
     pub(super) fn memory(&mut self, ui: &mut egui::Ui, snap: &Arc<Snapshot>) {
         let m = snap.machine.memory.clone();
-        let u = self.settings.units;
+        let u = self.units();
         let pal = self.pal(ui.ctx());
         let fmt = move |v: f64| u.bytes(v as u64);
         let used_frac = m.used as f64 / m.total.max(1) as f64;
         let (pressure, pc) = if m.swap_used > m.total / 8 || used_frac > 0.95 {
-            ("High pressure", pal.danger)
+            (self.t("pressure.high_long"), pal.danger)
         } else if m.swap_used > 0 && used_frac > 0.85 {
-            ("Elevated pressure", pal.warn)
+            (self.t("pressure.elevated_long"), pal.warn)
         } else {
-            ("Normal pressure", self.color(ui, MetricKind::Battery))
+            (self.t("pressure.normal_long"), self.color(ui, MetricKind::Battery))
         };
         self.hero(ui, Hero {
             kind: MetricKind::Memory,
             metric: "memory",
-            caption: format!("In use of {}", u.bytes(m.total)),
+            caption: self.tf("in_use_of", &[("total", &u.bytes(m.total))]),
             value: u.bytes(m.used),
-            badge: Some((pressure.into(), pc)),
-            rows: vec![("Swap".into(), u.bytes(m.swap_used))],
+            badge: Some((pressure, pc)),
+            rows: vec![(self.t("swap"), u.bytes(m.swap_used))],
             max: Some(m.total as f64),
             fmt: &fmt,
         });
         let tiles = vec![
-            Tile::text("☰", "App", u.bytes(m.app), "Used by apps"),
-            Tile::text("☰", "Wired", u.bytes(m.wired), "Kept in RAM by macOS"),
-            Tile::text("☰", "Compressed", u.bytes(m.compressed), format!("Cached {}", u.bytes(m.cached))),
-            self.top_app_tile(snap, RankMetric::Memory, "Top App"),
+            Tile::text("☰", self.t("mem.app"), u.bytes(m.app), self.t("tl.used_by_apps")),
+            Tile::text("☰", self.t("mem.wired"), u.bytes(m.wired), self.t("tl.kept_in_ram")),
+            Tile::text("☰", self.t("mem.compressed"), u.bytes(m.compressed), self.tf("tl.cached", &[("v", &u.bytes(m.cached))])),
+            self.top_app_tile(snap, RankMetric::Memory, "tl.top_app"),
         ];
         self.tiles(ui, MetricKind::Memory, tiles);
         let dark = ui.visuals().dark_mode;
         let parts = [
-            ("App".to_string(), m.app as f64, self.color(ui, MetricKind::Cpu)),
-            ("Wired".to_string(), m.wired as f64, self.color(ui, MetricKind::Sound)),
-            ("Compressed".to_string(), m.compressed as f64, self.color(ui, MetricKind::Network)),
-            ("Cached".to_string(), m.cached as f64, if dark { Color32::from_gray(110) } else { Color32::from_gray(170) }),
+            (self.t("mem.app"), m.app as f64, self.color(ui, MetricKind::Cpu)),
+            (self.t("mem.wired"), m.wired as f64, self.color(ui, MetricKind::Sound)),
+            (self.t("mem.compressed"), m.compressed as f64, self.color(ui, MetricKind::Network)),
+            (self.t("mem.cached"), m.cached as f64, if dark { Color32::from_gray(110) } else { Color32::from_gray(170) }),
         ];
-        Self::section(ui, "Memory by Type", &format!("{} free", u.bytes(m.free)), |ui| {
+        Self::section(ui, &self.t("memory_by_type"), &self.tf("n_free", &[("v", &u.bytes(m.free))]), |ui| {
             widgets::stacked_bar(ui, &parts, m.total as f64);
             ui.add_space(6.0);
             ui.horizontal_wrapped(|ui| {
@@ -686,37 +694,37 @@ impl PulseApp {
                 }
             });
         });
-        self.app_list(ui, snap, RankMetric::Memory, 60, "Memory");
+        self.app_list(ui, snap, RankMetric::Memory, 60, "tab.memory");
     }
 
     pub(super) fn disk(&mut self, ui: &mut egui::Ui, snap: &Arc<Snapshot>) {
         let d = snap.machine.disk.clone();
-        let u = self.settings.units;
+        let u = self.units();
         let fmt = move |v: f64| u.rate(v);
         let written = self.history_total("disk_write", local_midnight());
         self.hero(ui, Hero {
             kind: MetricKind::Disk,
             metric: "disk",
-            caption: "Reading + writing".into(),
+            caption: self.t("disk.read_write"),
             value: u.rate(d.read_bps + d.write_bps),
             badge: None,
-            rows: vec![("Written today".into(), written.filter(|v| *v > 0.0).map(|v| u.transferred(v as u64)).unwrap_or("—".into()))],
+            rows: vec![(self.t("disk.written_today"), written.filter(|v| *v > 0.0).map(|v| u.transferred(v as u64)).unwrap_or("—".into()))],
             max: None,
             fmt: &fmt,
         });
         let boot = d.boot_free().cloned();
         let tiles = vec![
-            Tile::text("🖴", "Reading", u.rate(d.read_bps), "From disk"),
-            Tile::text("🖴", "Writing", u.rate(d.write_bps), "To disk"),
-            Tile::text("🖴", "Free", boot.as_ref().map(|v| u.bytes(v.free)).unwrap_or("—".into()), boot.as_ref().map(|v| format!("of {}", u.bytes(v.total))).unwrap_or_default()),
-            self.top_app_tile(snap, RankMetric::Disk, "Top App"),
+            Tile::text("🖴", self.t("st.reading"), u.rate(d.read_bps), self.t("disk.from_disk")),
+            Tile::text("🖴", self.t("st.writing"), u.rate(d.write_bps), self.t("disk.to_disk")),
+            Tile::text("🖴", self.t("free"), boot.as_ref().map(|v| u.bytes(v.free)).unwrap_or("—".into()), boot.as_ref().map(|v| self.tf("tl.of", &[("v", &u.bytes(v.total))])).unwrap_or_default()),
+            self.top_app_tile(snap, RankMetric::Disk, "tl.top_app"),
         ];
         self.tiles(ui, MetricKind::Disk, tiles);
         let color = self.color(ui, MetricKind::Disk);
-        Self::section(ui, "Volumes", "Used", |ui| {
+        Self::section(ui, &self.t("disk.volumes"), &self.t("disk.used"), |ui| {
             for v in &d.volumes {
                 let used = 1.0 - v.free as f64 / v.total.max(1) as f64;
-                let sub = format!("{} · {} free of {}{}", v.mount_point, u.bytes(v.free), u.bytes(v.total), if v.removable { " · removable" } else { "" });
+                let sub = self.tf("disk.volume_sub", &[("mount", &v.mount_point), ("free", &u.bytes(v.free)), ("total", &u.bytes(v.total)), ("removable", &if v.removable { self.t("disk.removable") } else { String::new() })]);
                 self.row(ui, "🖴", color, &v.name, &sub, |ui| {
                     ui.allocate_ui_with_layout(Vec2::new(200.0, 34.0), egui::Layout::top_down(Align::Max), |ui| {
                         ui.set_width(200.0);
@@ -726,12 +734,12 @@ impl PulseApp {
                 });
             }
         });
-        self.app_list(ui, snap, RankMetric::Disk, 25, "Disk");
+        self.app_list(ui, snap, RankMetric::Disk, 25, "tab.disk");
     }
 
     pub(super) fn network(&mut self, ui: &mut egui::Ui, snap: &Arc<Snapshot>) {
         let n = snap.machine.network.clone();
-        let u = self.settings.units;
+        let u = self.units();
         let fmt = move |v: f64| u.rate(v);
         let today = self.history_total("net_down", local_midnight());
         let week = self.history_total("net_down", sys::now_s() - 7 * 86_400);
@@ -739,55 +747,55 @@ impl PulseApp {
         self.hero(ui, Hero {
             kind: MetricKind::Network,
             metric: "network",
-            caption: "Down + up".into(),
+            caption: self.t("net.down_up"),
             value: u.rate(n.rx_bps + n.tx_bps),
             badge: None,
-            rows: vec![("Downloaded, 7 days".into(), tot(week))],
+            rows: vec![(self.t("net.downloaded_7d"), tot(week))],
             max: None,
             fmt: &fmt,
         });
         let tiles = vec![
-            Tile::text("🌐", "Downloading", u.rate(n.rx_bps), "All interfaces"),
-            Tile::text("🌐", "Uploading", u.rate(n.tx_bps), "All interfaces"),
-            Tile::text("🌐", "Today", tot(today), "Downloaded since midnight"),
-            self.top_app_tile(snap, RankMetric::Network, "Top App"),
+            Tile::text("🌐", self.t("st.downloading"), u.rate(n.rx_bps), self.t("net.all_interfaces")),
+            Tile::text("🌐", self.t("st.uploading"), u.rate(n.tx_bps), self.t("net.all_interfaces")),
+            Tile::text("🌐", self.t("st.today"), tot(today), self.t("net.since_midnight")),
+            self.top_app_tile(snap, RankMetric::Network, "tl.top_app"),
         ];
         self.tiles(ui, MetricKind::Network, tiles);
         let color = self.color(ui, MetricKind::Network);
-        Self::section(ui, "Interfaces", "Down · Up", |ui| {
+        Self::section(ui, &self.t("net.interfaces"), &self.t("net.down_up_short"), |ui| {
             for i in &n.interfaces {
-                let sub = format!("{} down · {} up since boot", u.transferred(i.total_rx), u.transferred(i.total_tx));
+                let sub = self.tf("net.since_boot", &[("down", &u.transferred(i.total_rx)), ("up", &u.transferred(i.total_tx))]);
                 self.row(ui, "🌐", color, &i.name, &sub, |ui| {
                     ui.label(RichText::new(format!("{}  ·  {}", u.rate(i.rx_bps), u.rate(i.tx_bps))).strong());
                 });
             }
         });
-        self.app_list(ui, snap, RankMetric::Network, 25, "Network · every 15 s");
+        self.app_list(ui, snap, RankMetric::Network, 25, "net.list_title");
     }
 
     pub(super) fn gpu(&mut self, ui: &mut egui::Ui, snap: &Arc<Snapshot>) {
         let g = snap.machine.gpu.clone();
-        let u = self.settings.units;
+        let u = self.units();
         let fmt = |v: f64| format!("{v:.0}%");
         self.hero(ui, Hero {
             kind: MetricKind::Gpu,
             metric: "gpu",
             caption: if g.name.is_empty() { "GPU".into() } else { g.name.clone() },
             value: format!("{:.0} %", g.utilization_pct),
-            badge: (!g.available).then(|| ("No GPU statistics".to_string(), self.pal(ui.ctx()).warn)),
+            badge: (!g.available).then(|| (self.t("gpu.no_stats"), self.pal(ui.ctx()).warn)),
             rows: vec![],
             max: Some(100.0),
             fmt: &fmt,
         });
         let s = &snap.machine.sensors;
         let tiles = vec![
-            Tile::text("🖥", "GPU Memory", if g.vram_used > 0 { u.bytes(g.vram_used) } else { "—".into() }, if g.vram_total > 0 { format!("of {}", u.bytes(g.vram_total)) } else { "Shared with the CPU".into() }),
-            Tile::text("⚡", "Power", watts(g.power_w.or(snap.machine.power.gpu_w)), "GPU package"),
-            Tile::text("🖥", "Temperature", s.gpu_temp_c.map(|t| u.temp(t)).unwrap_or("—".into()), "GPU die"),
-            self.top_app_tile(snap, RankMetric::Energy, "Top Energy App"),
+            Tile::text("🖥", self.t("gpu.memory"), if g.vram_used > 0 { u.bytes(g.vram_used) } else { "—".into() }, if g.vram_total > 0 { self.tf("tl.of", &[("v", &u.bytes(g.vram_total))]) } else { self.t("gpu.shared") }),
+            Tile::text("⚡", self.t("st.power"), watts(&self.i18n, g.power_w.or(snap.machine.power.gpu_w)), self.t("gpu.package")),
+            Tile::text("🖥", self.t("temperature"), s.gpu_temp_c.map(|t| u.temp(t)).unwrap_or("—".into()), self.t("gpu.die")),
+            self.top_app_tile(snap, RankMetric::Energy, "tl.top_energy_app"),
         ];
         self.tiles(ui, MetricKind::Gpu, tiles);
-        self.app_list(ui, snap, RankMetric::Energy, 15, "Energy · macOS has no per-app GPU time");
+        self.app_list(ui, snap, RankMetric::Energy, 15, "gpu.list_title");
     }
 
     pub(super) fn neural(&mut self, ui: &mut egui::Ui, snap: &Arc<Snapshot>) {
@@ -797,56 +805,52 @@ impl PulseApp {
         self.hero(ui, Hero {
             kind: MetricKind::Neural,
             metric: "neural",
-            caption: if n.available { "Estimated load".into() } else { "Not reported on this Mac".into() },
+            caption: if n.available { self.t("neural.estimated_load") } else { self.t("neural.not_reported") },
             value: if n.available { format!("{:.0} %", n.utilization_pct) } else { "—".into() },
             badge: None,
-            rows: vec![("Power".into(), watts(Some(n.power_w)))],
+            rows: vec![(self.t("st.power"), watts(&self.i18n, Some(n.power_w)))],
             max: Some(100.0),
             fmt: &fmt,
         });
         let total = [p.cpu_w, p.gpu_w, p.ane_w].iter().flatten().sum::<f64>();
-        let share = p.ane_w.filter(|_| total > 0.0).map(|a| format!("{:.0}% of chip power", a / total * 100.0)).unwrap_or_default();
+        let share = p.ane_w.filter(|_| total > 0.0).map(|a| self.tf("neural.chip_share", &[("v", &format!("{:.0}", a / total * 100.0))])).unwrap_or_default();
         let tiles = vec![
-            Tile::text("⚛", "Neural Engine", watts(p.ane_w), share),
-            Tile::text("▣", "CPU", watts(p.cpu_w), "Package power"),
-            Tile::text("🖥", "GPU", watts(p.gpu_w), "Package power"),
-            Tile::text("⚡", "System", watts(p.system_w), "Whole Mac"),
+            Tile::text("⚛", "Neural Engine", watts(&self.i18n, p.ane_w), share),
+            Tile::text("▣", "CPU", watts(&self.i18n, p.cpu_w), self.t("neural.package_power")),
+            Tile::text("🖥", "GPU", watts(&self.i18n, p.gpu_w), self.t("neural.package_power")),
+            Tile::text("⚡", self.t("st.system"), watts(&self.i18n, p.system_w), self.t("neural.whole_mac")),
         ];
         self.tiles(ui, MetricKind::Neural, tiles);
-        Self::section(ui, "About this number", "", |ui| {
-            ui.label(RichText::new(if n.available {
-                "Neural Engine power comes from IOReport's Energy Model. Load is estimated against an 8 W reference, because macOS doesn't report Neural Engine utilisation or per-app use."
-            } else {
-                "The Neural Engine is not reported on this Mac (Intel, or IOReport unavailable)."
-            }).weak());
+        Self::section(ui, &self.t("neural.about"), "", |ui| {
+            ui.label(RichText::new(self.t(if n.available { "neural.about_text" } else { "neural.about_unavailable" })).weak());
         });
     }
 
     pub(super) fn battery(&mut self, ui: &mut egui::Ui, snap: &Arc<Snapshot>) {
         let b = snap.machine.battery.clone();
-        let u = self.settings.units;
+        let u = self.units();
         let pal = self.pal(ui.ctx());
         let fmt = |v: f64| format!("{v:.0}%");
-        let state = if !b.present { "No battery" } else if b.charging { "Charging" } else if b.on_ac { "On power adapter" } else { "On battery" };
+        let state = self.t(if !b.present { "battery.none" } else if b.charging { "battery.charging" } else if b.on_ac { "battery.on_adapter" } else { "battery.on_battery" });
         self.hero(ui, Hero {
             kind: MetricKind::Battery,
             metric: "battery",
-            caption: state.into(),
-            value: if b.present { format!("{:.0} %", b.percent) } else { watts(snap.machine.power.system_w) },
+            caption: state.clone(),
+            value: if b.present { format!("{:.0} %", b.percent) } else { watts(&self.i18n, snap.machine.power.system_w) },
             badge: None,
-            rows: vec![("System power".into(), watts(snap.machine.power.system_w))],
+            rows: vec![(self.t("battery.system_power"), watts(&self.i18n, snap.machine.power.system_w))],
             max: Some(100.0),
             fmt: &fmt,
         });
         let low_health = b.health_pct.filter(|h| *h < 80.0).map(|_| pal.warn);
         let tiles = vec![
-            Tile::text("🔋", if b.charging { "Until Full" } else { "Remaining" }, b.time_remaining_min.filter(|m| *m > 0).map(|m| format_duration(m * 60)).unwrap_or("—".into()), state),
-            Tile::text("⚡", "Power Draw", watts(b.power_w.map(f64::abs)), if b.charging { "Into the battery" } else { "From the battery" }),
-            Tile::text("🔋", "Health", pct(b.health_pct), b.cycle_count.map(|c| format!("{c} cycles")).unwrap_or_default()).colored(low_health),
-            Tile::text("🔋", "Temperature", b.temperature_c.map(|t| u.temp(t)).unwrap_or("—".into()), "Battery pack"),
+            Tile::text("🔋", self.t(if b.charging { "st.until_full" } else { "st.remaining" }), b.time_remaining_min.filter(|m| *m > 0).map(|m| format_duration(m * 60)).unwrap_or("—".into()), state),
+            Tile::text("⚡", self.t("st.power_draw"), watts(&self.i18n, b.power_w.map(f64::abs)), self.t(if b.charging { "battery.into" } else { "battery.from" })),
+            Tile::text("🔋", self.t("st.health"), pct(b.health_pct), b.cycle_count.map(|c| self.i18n.tn("n.cycles", c as usize, &[])).unwrap_or_default()).colored(low_health),
+            Tile::text("🔋", self.t("temperature"), b.temperature_c.map(|t| u.temp(t)).unwrap_or("—".into()), self.t("battery.pack")),
         ];
         self.tiles(ui, MetricKind::Battery, tiles);
-        self.app_list(ui, snap, RankMetric::Energy, 25, "Energy");
+        self.app_list(ui, snap, RankMetric::Energy, 25, "hist.energy");
     }
 
     pub(super) fn sound(&mut self, ui: &mut egui::Ui, snap: &Arc<Snapshot>) {
@@ -855,40 +859,40 @@ impl PulseApp {
         let playing = a.apps.iter().filter(|x| x.state == AudioState::Playing).count();
         let mics = a.apps.iter().filter(|x| x.using_mic).count();
         let tiles = vec![
-            Tile::text("🔊", "Output", a.output_volume.map(|v| format!("{:.0}%", v * 100.0)).unwrap_or("—".into()), if a.output_muted { "Muted".to_string() } else { a.output_device.clone().unwrap_or("No output device".into()) }),
-            Tile::text("🔊", "Microphone", a.input_volume.map(|v| format!("{:.0}%", v * 100.0)).unwrap_or("—".into()), "Input level"),
-            Tile::text("🔊", "Playing", playing.to_string(), format!("{} apps with audio", a.apps.len())),
-            Tile::text("🔊", "Using the Mic", mics.to_string(), if mics > 0 { "Microphone in use" } else { "Nobody is listening" }).colored((mics > 0).then_some(color)),
+            Tile::text("🔊", self.t("sound.output"), a.output_volume.map(|v| format!("{:.0}%", v * 100.0)).unwrap_or("—".into()), if a.output_muted { self.t("sound.muted") } else { a.output_device.clone().unwrap_or(self.t("sound.no_output")) }),
+            Tile::text("🔊", self.t("sound.microphone"), a.input_volume.map(|v| format!("{:.0}%", v * 100.0)).unwrap_or("—".into()), self.t("sound.input_level")),
+            Tile::text("🔊", self.t("sound.playing"), playing.to_string(), self.i18n.tn("sound.apps_audio", a.apps.len(), &[])),
+            Tile::text("🔊", self.t("sound.using_mic"), mics.to_string(), self.t(if mics > 0 { "sound.mic_in_use" } else { "sound.nobody" })).colored((mics > 0).then_some(color)),
         ];
         self.tiles(ui, MetricKind::Sound, tiles);
-        Self::section(ui, "Volume", a.output_device.as_deref().unwrap_or(""), |ui| {
+        Self::section(ui, &self.t("sound.volume"), a.output_device.as_deref().unwrap_or(""), |ui| {
             if let Some(mut v) = a.output_volume {
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new("Output").size(14.0));
+                    ui.label(RichText::new(self.t("sound.output")).size(14.0));
                     ui.spacing_mut().slider_width = 320.0;
                     if ui.add(egui::Slider::new(&mut v, 0.0..=1.0).show_value(false)).changed() {
                         crate::collectors::devices::set_volume(false, v);
                     }
                     let mut muted = a.output_muted;
-                    if ui.checkbox(&mut muted, "Muted").changed() {
+                    if ui.checkbox(&mut muted, self.t("sound.muted")).changed() {
                         crate::collectors::devices::set_muted(muted);
                     }
                 });
             }
             if let Some(mut v) = a.input_volume {
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new("Microphone").size(14.0));
+                    ui.label(RichText::new(self.t("sound.microphone")).size(14.0));
                     ui.spacing_mut().slider_width = 320.0;
                     if ui.add(egui::Slider::new(&mut v, 0.0..=1.0).show_value(false)).changed() {
                         crate::collectors::devices::set_volume(true, v);
                     }
                 });
             }
-            ui.label(RichText::new("Per-app volume needs a CoreAudio process tap (macOS 14.4+); this build controls device volume.").small().weak());
+            ui.label(RichText::new(self.t("sound.per_app_note")).small().weak());
         });
-        Self::section(ui, "Apps Using Audio", "State", |ui| {
+        Self::section(ui, &self.t("sound.apps_using"), &self.t("sound.state"), |ui| {
             if a.apps.is_empty() {
-                ui.label(RichText::new("No app is using audio right now.").weak());
+                ui.label(RichText::new(self.t("sound.none_using")).weak());
             }
             for app in &a.apps {
                 let bundle = snap.app_for_pid(app.pid).and_then(|g| g.app.bundle_path.clone());
@@ -898,14 +902,14 @@ impl PulseApp {
                     ui.add_space(6.0);
                     ui.label(RichText::new(&app.app_name).size(14.5).strong().color(ui.visuals().strong_text_color()));
                     ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
-                        let s = match app.state {
-                            AudioState::Playing => "Playing",
-                            AudioState::Silent => "Silent",
-                            AudioState::Muted => "Muted",
-                        };
-                        widgets::chip(ui, s, color);
+                        let s = self.t(match app.state {
+                            AudioState::Playing => "sound.playing",
+                            AudioState::Silent => "sound.silent",
+                            AudioState::Muted => "sound.muted",
+                        });
+                        widgets::chip(ui, &s, color);
                         if app.using_mic {
-                            widgets::chip(ui, "Mic", self.pal(ui.ctx()).warn);
+                            widgets::chip(ui, &self.t("sound.mic"), self.pal(ui.ctx()).warn);
                         }
                     });
                 });
@@ -921,25 +925,26 @@ impl PulseApp {
         let lowest = b.devices.iter().filter(|d| d.connected).map(|d| (d.name.clone(), batt(d))).filter(|x| !x.1.is_nan()).min_by(|x, y| x.1.total_cmp(&y.1));
         let connected = b.devices.iter().filter(|d| d.connected).count();
         let tiles = vec![
-            Tile::text("📶", "Bluetooth", if b.powered { "On" } else { "Off" }, "Refreshed every 60 s"),
-            Tile::text("📶", "Connected", connected.to_string(), "Devices nearby"),
-            Tile::text("📶", "Paired", b.devices.len().to_string(), format!("{} away", b.devices.len() - connected)),
-            Tile::text("🔋", "Lowest Battery", lowest.as_ref().map(|x| format!("{:.0}%", x.1)).unwrap_or("—".into()), lowest.as_ref().map(|x| x.0.clone()).unwrap_or_default())
+            Tile::text("📶", "Bluetooth", self.t(if b.powered { "bt.on" } else { "bt.off" }), self.t("bt.refreshed")),
+            Tile::text("📶", self.t("bt.connected"), connected.to_string(), self.t("bt.nearby")),
+            Tile::text("📶", self.t("bt.paired"), b.devices.len().to_string(), self.tf("bt.away", &[("n", &(b.devices.len() - connected).to_string())])),
+            Tile::text("🔋", self.t("bt.lowest"), lowest.as_ref().map(|x| format!("{:.0}%", x.1)).unwrap_or("—".into()), lowest.as_ref().map(|x| x.0.clone()).unwrap_or_default())
                 .colored(lowest.as_ref().filter(|x| x.1 < 20.0).map(|_| pal.danger)),
         ];
         self.tiles(ui, MetricKind::Bluetooth, tiles);
         let mut open_settings = false;
-        Self::section(ui, "Devices", "Battery", |ui| {
+        Self::section(ui, &self.t("bt.devices"), &self.t("tab.battery"), |ui| {
             for d in &b.devices {
-                let sub = format!("{}{}", if d.connected { "Connected" } else { "Paired, not connected" }, if d.kind.is_empty() { String::new() } else { format!(" · {}", d.kind) });
+                let sub = format!("{}{}", self.t(if d.connected { "bt.connected" } else { "bt.not_connected" }), if d.kind.is_empty() { String::new() } else { format!(" · {}", d.kind) });
                 let lead = if d.connected { color } else { ui.visuals().weak_text_color() };
                 self.row(ui, "📶", lead, &d.name, &sub, |ui| {
                     let parts: Vec<(&str, Option<f64>)> = if d.battery_left.is_some() || d.battery_right.is_some() {
-                        vec![("Case", d.battery_case), ("R", d.battery_right), ("L", d.battery_left)]
+                        vec![("bt.case", d.battery_case), ("R", d.battery_right), ("L", d.battery_left)]
                     } else {
                         vec![("", d.battery_main)]
                     };
                     for (label, v) in parts {
+                        let label = if label.starts_with("bt.") { self.t(label) } else { label.to_string() };
                         if let Some(v) = v {
                             ui.allocate_ui_with_layout(Vec2::new(70.0, 34.0), egui::Layout::top_down(Align::Max), |ui| {
                                 ui.set_width(70.0);
@@ -952,10 +957,10 @@ impl PulseApp {
                 });
             }
             if b.devices.is_empty() {
-                ui.label(RichText::new("No devices yet (refreshed every 60 s).").weak());
+                ui.label(RichText::new(self.t("bt.no_devices")).weak());
             }
             ui.add_space(4.0);
-            open_settings = ui.button("Bluetooth Settings…").clicked();
+            open_settings = ui.button(self.t("bt.settings")).clicked();
         });
         if open_settings {
             let _ = std::process::Command::new("/usr/bin/open").arg("x-apple.systempreferences:com.apple.BluetoothSettings").spawn();
@@ -963,21 +968,21 @@ impl PulseApp {
     }
 
     pub(super) fn projects_tab(&mut self, ui: &mut egui::Ui, snap: &Arc<Snapshot>) {
-        let u = self.settings.units;
+        let u = self.units();
         let pal = self.pal(ui.ctx());
         let color = self.color(ui, MetricKind::Cpu);
         let idle = projects::idle_servers(&snap.projects);
         let servers: usize = snap.projects.iter().map(|p| p.servers.len()).sum();
         let tiles = vec![
-            Tile::text("🗀", "Projects", snap.projects.len().to_string(), "With running processes"),
-            Tile::text("🗀", "Dev Servers", servers.to_string(), "Listening on a port"),
-            Tile::text("🗀", "Idle Servers", idle.len().to_string(), "No traffic for a while").colored((!idle.is_empty()).then_some(pal.warn)),
-            Tile::text("☰", "Memory", u.bytes(snap.projects.iter().map(|p| p.mem_bytes).sum()), "All project processes"),
+            Tile::text("🗀", self.t("tab.projects"), snap.projects.len().to_string(), self.t("proj.with_processes")),
+            Tile::text("🗀", self.t("proj.dev_servers"), servers.to_string(), self.t("proj.listening")),
+            Tile::text("🗀", self.t("proj.idle_servers"), idle.len().to_string(), self.t("proj.no_traffic")).colored((!idle.is_empty()).then_some(pal.warn)),
+            Tile::text("☰", self.t("tab.memory"), u.bytes(snap.projects.iter().map(|p| p.mem_bytes).sum()), self.t("proj.all_processes")),
         ];
         self.tiles(ui, MetricKind::Cpu, tiles);
         let mut ask: Vec<Target> = vec![];
-        if let Some(b) = projects::idle_banner(&snap.projects) {
-            Self::section(ui, "Idle", "", |ui| {
+        if let Some(b) = loc::idle_banner(&self.i18n, &u, &snap.projects) {
+            Self::section(ui, &self.t("proj.idle"), "", |ui| {
                 ui.horizontal(|ui| {
                     ui.label(RichText::new(&b).color(pal.warn));
                     ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
@@ -989,17 +994,17 @@ impl PulseApp {
             });
         }
         if snap.projects.is_empty() {
-            Self::section(ui, "Projects", "", |ui| {
-                ui.label(RichText::new("No processes are running inside a project folder under your home directory.").weak());
+            Self::section(ui, &self.t("tab.projects"), "", |ui| {
+                ui.label(RichText::new(self.t("proj.none")).weak());
             });
         }
         for p in &snap.projects {
-            let right = format!("{} · {} proc. · {}", u.bytes(p.mem_bytes), p.process_count, p.state);
+            let right = format!("{} · {} · {}", u.bytes(p.mem_bytes), self.tf("proj.proc_short", &[("n", &p.process_count.to_string())]), loc::project_state(&self.i18n, &p.state));
             Self::section(ui, &p.project.name, &right, |ui| {
                 ui.label(RichText::new(&p.project.folder_path).small().weak());
                 for s in &p.servers {
                     let lead = if s.idle { pal.warn } else { color };
-                    let sub = format!("{} · {}", u.bytes(s.mem_bytes), if s.idle { format!("idle {}", format_duration(s.idle_secs)) } else { "active".into() });
+                    let sub = format!("{} · {}", u.bytes(s.mem_bytes), if s.idle { self.tf("proj.idle_for", &[("t", &format_duration(s.idle_secs))]) } else { self.t("proj.active") });
                     self.row(ui, "🗀", lead, &format!(":{}  {}", s.port, s.command), &sub, |ui| {
                         if ui.button(self.i18n.t("stop")).clicked() {
                             ask.push(Target::DevServer(s.process_pid));
@@ -1022,32 +1027,32 @@ impl PulseApp {
             let n = plans.len();
             if let Some(first) = plans.into_iter().next() {
                 let mem = pids.iter().filter_map(|p| snap.process(*p)).map(|p| p.mem_bytes).sum();
-                self.confirm = Some(Plan { title: format!("{n} idle dev servers"), pids, ports, mem_bytes: mem, ..first });
+                self.confirm = Some(Plan { title: self.i18n.tn("n.idle_servers", n, &[]), pids, ports, mem_bytes: mem, ..first });
             }
         }
     }
 
     pub(super) fn agents_tab(&mut self, ui: &mut egui::Ui, snap: &Arc<Snapshot>) {
-        let u = self.settings.units;
+        let u = self.units();
         let now = snap.timestamp / 1000;
         let pal = self.pal(ui.ctx());
         let color = self.color(ui, MetricKind::Memory);
         let working = snap.agents.iter().filter(|a| a.state == AgentState::Working).count();
         let tightest = snap.plans.iter().filter(|p| p.pace_state != PaceState::Unknown).min_by(|a, b| b.used_pct.total_cmp(&a.used_pct));
         let tiles = vec![
-            Tile::text("👾", "Sessions", snap.agents.len().to_string(), format!("{working} working")),
-            Tile::text("☰", "Memory", u.bytes(snap.agents.iter().map(|a| a.mem_bytes).sum()), "Agents and what they started"),
-            Tile::text("▣", "CPU", u.cpu(snap.agents.iter().map(|a| a.cpu_percent).sum(), snap.machine.cpu.core_count), "All sessions"),
+            Tile::text("👾", self.t("st.sessions"), snap.agents.len().to_string(), self.tf("agents.n_working", &[("n", &working.to_string())])),
+            Tile::text("☰", self.t("tab.memory"), u.bytes(snap.agents.iter().map(|a| a.mem_bytes).sum()), self.t("agents.and_started")),
+            Tile::text("▣", "CPU", u.cpu(snap.agents.iter().map(|a| a.cpu_percent).sum(), snap.machine.cpu.core_count), self.t("agents.all_sessions")),
             match tightest {
-                Some(p) => Tile::text("👾", "Closest Limit", format!("{:.0}% left", 100.0 - p.used_pct), format!("{} · {}", p.provider, p.window))
+                Some(p) => Tile::text("👾", self.t("agents.closest_limit"), self.tf("pct_left", &[("v", &format!("{:.0}", 100.0 - p.used_pct))]), format!("{} · {}", p.provider, loc::window_label(&self.i18n, &p.window)))
                     .colored((p.pace_state == PaceState::RunsOut).then_some(pal.danger)),
-                None => Tile::text("👾", "Closest Limit", "—", "No plan usage found"),
+                None => Tile::text("👾", self.t("agents.closest_limit"), "—", self.t("no_plan_usage")),
             },
         ];
         self.tiles(ui, MetricKind::Memory, tiles);
-        Self::section(ui, "AI Plans", "Used", |ui| {
+        Self::section(ui, &self.t("agents.ai_plans"), &self.t("agents.used"), |ui| {
             if snap.plans.is_empty() {
-                ui.label(RichText::new("Configure plans in Settings.").weak());
+                ui.label(RichText::new(self.t("agents.configure")).weak());
             }
             for p in &snap.plans {
                 let c = match p.pace_state {
@@ -1056,8 +1061,9 @@ impl PulseApp {
                     PaceState::OnPace => color,
                     PaceState::Unknown => ui.visuals().weak_text_color(),
                 };
-                let headline = limits::headline(p, now);
-                let sub = if headline.contains(&p.pace_text) { "" } else { p.pace_text.as_str() };
+                let headline = loc::plan_headline(&self.i18n, p, now);
+                let pace = loc::pace_text(&self.i18n, &p.pace_text);
+                let sub = if headline.contains(&pace) { "" } else { pace.as_str() };
                 self.row(ui, "👾", c, &headline, sub, |ui| {
                     ui.allocate_ui_with_layout(Vec2::new(220.0, 34.0), egui::Layout::top_down(Align::Max), |ui| {
                         ui.set_width(220.0);
@@ -1070,25 +1076,25 @@ impl PulseApp {
         let mut quit: Option<i32> = None;
         let mut toggle: Option<String> = None;
         let expanded = self.expanded.clone();
-        Self::section(ui, "Sessions", "Memory · CPU", |ui| {
+        Self::section(ui, &self.t("st.sessions"), &self.t("agents.memory_cpu"), |ui| {
             if snap.agents.is_empty() {
-                ui.label(RichText::new("No AI agent sessions running.").weak());
+                ui.label(RichText::new(self.t("agents.none")).weak());
             }
             for a in &snap.agents {
                 let (st, c) = match a.state {
-                    AgentState::Working => ("working", color),
-                    AgentState::Waiting => ("waiting for you", pal.warn),
-                    AgentState::Idle => ("idle", ui.visuals().weak_text_color()),
+                    AgentState::Working => (loc::agent_state(&self.i18n, a.state), color),
+                    AgentState::Waiting => (loc::agent_state(&self.i18n, a.state), pal.warn),
+                    AgentState::Idle => (loc::agent_state(&self.i18n, a.state), ui.visuals().weak_text_color()),
                 };
                 let key = format!("agent:{}", a.pid);
                 let open = expanded.get(&key).copied().unwrap_or(false);
                 let sub = format!("{}{} · {} · {}", a.project, a.branch_or_task.as_ref().map(|b| format!(" · {b}")).unwrap_or_default(), st, format_duration(now - a.started_at));
                 self.row(ui, "👾", c, a.agent_kind.label(), &sub, |ui| {
-                    if ui.button("Quit Session…").clicked() {
+                    if ui.button(self.t("agents.quit_session")).clicked() {
                         quit = Some(a.pid);
                     }
                     if !a.started.is_empty() {
-                        let label = if open { "Hide started".to_string() } else { format!("{} started", a.started.len()) };
+                        let label = if open { self.t("agents.hide_started") } else { self.i18n.tn("agents.n_started", a.started.len(), &[]) };
                         if ui.button(label).clicked() {
                             toggle = Some(key.clone());
                         }
@@ -1118,31 +1124,47 @@ impl PulseApp {
         }
     }
 
+    /// `docker::card_line` in the UI language: "rabbitmq — 206 MB — 86 % of 240 MB — up 3 hours — port 5672".
+    fn container_line(&self, c: &Container) -> String {
+        let u = self.units();
+        let mut parts = vec![c.name.clone(), u.bytes(c.mem_bytes)];
+        if let Some(p) = c.mem_pct_of_limit() {
+            parts.push(self.tf("docker.pct_of", &[("p", &format!("{p:.0}")), ("limit", &u.bytes(c.mem_limit))]));
+        }
+        parts.push(c.status.to_lowercase());
+        if !c.published_ports.is_empty() {
+            let ps: Vec<String> = c.published_ports.iter().map(u16::to_string).collect();
+            parts.push(self.i18n.tn("n.port_list", ps.len(), &[("ports", &ps.join(", "))]));
+        }
+        parts.join(" — ")
+    }
+
     pub(super) fn containers_tab(&mut self, ui: &mut egui::Ui, snap: &Arc<Snapshot>) {
-        let u = self.settings.units;
+        let u = self.units();
         let pal = self.pal(ui.ctx());
         let color = self.color(ui, MetricKind::Network);
         if !snap.docker_available {
-            self.tiles(ui, MetricKind::Network, vec![Tile::text("📦", "Docker", "Not running", "No local Docker socket found")]);
+            self.tiles(ui, MetricKind::Network, vec![Tile::text("📦", "Docker", self.t("docker.not_running"), self.t("docker.no_socket"))]);
             return;
         }
         let near = docker::near_limit(&snap.containers);
         let running = snap.containers.iter().filter(|c| c.up()).count();
         let stacks = docker::stacks(&snap.containers);
         let tiles = vec![
-            Tile::text("📦", "Running", running.to_string(), format!("of {} containers", snap.containers.len())),
-            Tile::text("📦", "Stacks", stacks.len().to_string(), "Compose projects"),
-            Tile::text("☰", "Memory", u.bytes(snap.containers.iter().map(|c| c.mem_bytes).sum()), "All containers"),
-            Tile::text("📦", "Near Limit", near.len().to_string(), "Above 85% of memory limit").colored((!near.is_empty()).then_some(pal.danger)),
+            Tile::text("📦", self.t("docker.running"), running.to_string(), self.tf("docker.of_n", &[("n", &self.i18n.tn("n.containers", snap.containers.len(), &[]))])),
+            Tile::text("📦", self.t("docker.stacks"), stacks.len().to_string(), self.t("docker.compose")),
+            Tile::text("☰", self.t("tab.memory"), u.bytes(snap.containers.iter().map(|c| c.mem_bytes).sum()), self.t("docker.all")),
+            Tile::text("📦", self.t("docker.near_limit"), near.len().to_string(), self.t("docker.above_85")).colored((!near.is_empty()).then_some(pal.danger)),
         ];
         self.tiles(ui, MetricKind::Network, tiles);
         for c in &near {
-            ui.label(RichText::new(format!("⚠ {}", docker::card_line(c))).color(pal.danger));
+            ui.label(RichText::new(format!("⚠ {}", self.container_line(c))).color(pal.danger));
         }
         let mut stop: Option<String> = None;
         for (stack, cs) in stacks {
             let right = stack.project_hint.clone().unwrap_or_default();
-            Self::section(ui, &stack.name, &right, |ui| {
+            let stack_name = if stack.name == "standalone" { self.t("docker.standalone") } else { stack.name.clone() };
+            Self::section(ui, &stack_name, &right, |ui| {
                 for c in cs {
                     let lead = if c.up() { color } else { ui.visuals().weak_text_color() };
                     let ports = c.published_ports.iter().map(|p| format!(":{p}")).collect::<Vec<_>>().join(" ");
@@ -1156,8 +1178,8 @@ impl PulseApp {
                             ui.set_width(220.0);
                             let limit = c.mem_pct_of_limit();
                             let txt = match limit {
-                                Some(p) => format!("{} · {p:.0}% of {} · {:.1}% CPU", u.bytes(c.mem_bytes), u.bytes(c.mem_limit), c.cpu_pct),
-                                None => format!("{} · no limit · {:.1}% CPU", u.bytes(c.mem_bytes), c.cpu_pct),
+                                Some(p) => self.tf("docker.mem_limit", &[("mem", &u.bytes(c.mem_bytes)), ("p", &format!("{p:.0}")), ("limit", &u.bytes(c.mem_limit)), ("cpu", &self.i18n.num(format!("{:.1}", c.cpu_pct)))]),
+                                None => self.tf("docker.no_limit", &[("mem", &u.bytes(c.mem_bytes)), ("cpu", &self.i18n.num(format!("{:.1}", c.cpu_pct)))]),
                             };
                             ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| ui.label(RichText::new(txt).strong()));
                             if let Some(p) = limit {

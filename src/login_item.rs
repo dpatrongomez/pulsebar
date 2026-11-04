@@ -102,7 +102,7 @@ pub struct SetError {
 }
 
 /// `kSMErrorLaunchDeniedByUser` (ServiceManagement/SMErrors.h).
-const LAUNCH_DENIED_BY_USER: isize = 10;
+const LAUNCH_DENIED_BY_USER: isize = 11;
 
 impl SetError {
     /// An error that is not from the system: the same (English) text everywhere.
@@ -267,8 +267,11 @@ mod tests {
 
     #[test]
     fn set_error_messages_are_english() {
-        let denied = SetError { domain: "SMAppServiceErrorDomain".into(), code: 10, localized: "No se pudo".into() };
-        assert_eq!(denied.cli_message(), "SMAppServiceErrorDomain error 10 (approve PulseBar in System Settings → General → Login Items)");
+        let denied = SetError { domain: "SMAppServiceErrorDomain".into(), code: 11, localized: "No se pudo".into() };
+        assert_eq!(denied.cli_message(), "SMAppServiceErrorDomain error 11 (approve PulseBar in System Settings → General → Login Items)");
+        // kSMErrorInvalidPlist (10) sits right before it in SMErrors.h and gets no hint.
+        let other = SetError { domain: "SMAppServiceErrorDomain".into(), code: 10, localized: "x".into() };
+        assert_eq!(other.hint(), None);
         let other = SetError { domain: "SMAppServiceErrorDomain".into(), code: 1, localized: "No se pudo".into() };
         assert_eq!(other.cli_message(), "SMAppServiceErrorDomain error 1");
         assert_eq!(SetError::plain("nope").cli_message(), "nope");

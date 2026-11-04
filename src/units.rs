@@ -34,6 +34,10 @@ pub struct Units {
     pub temperature: TempUnit,
     pub data: DataUnit,
     pub cpu: CpuUnit,
+    /// Write the decimal separator as a comma ("3,07 GB"). Set by the GUI for Spanish; not a
+    /// setting (never saved), and the CLI/MCP leave it off so their output stays English.
+    #[serde(skip)]
+    pub decimal_comma: bool,
 }
 
 impl Units {
@@ -41,21 +45,21 @@ impl Units {
     /// bytes/bits choice applies to *rates* (disk and network throughput) and to totals of
     /// transferred data.
     pub fn bytes(&self, b: u64) -> String {
-        format_bytes(b as f64)
+        self.loc(format_bytes(b as f64))
     }
 
     pub fn rate(&self, bytes_per_sec: f64) -> String {
-        match self.data {
+        self.loc(match self.data {
             DataUnit::Bytes => format!("{}/s", format_bytes(bytes_per_sec)),
             DataUnit::Bits => format!("{}ps", format_bits(bytes_per_sec * 8.0)),
-        }
+        })
     }
 
     pub fn transferred(&self, bytes: u64) -> String {
-        match self.data {
+        self.loc(match self.data {
             DataUnit::Bytes => format_bytes(bytes as f64),
             DataUnit::Bits => format_bits(bytes as f64 * 8.0),
-        }
+        })
     }
 
     pub fn temp(&self, celsius: f64) -> String {
@@ -65,12 +69,22 @@ impl Units {
         }
     }
 
+    /// Power in watts with a fixed number of decimals ("1.23 W", "1,23 W" when the GUI asks).
+    pub fn watts(&self, w: f64, decimals: usize) -> String {
+        self.loc(format!("{w:.decimals$} W"))
+    }
+
     /// `pct_of_mac` is always 0–100 internally.
     pub fn cpu(&self, pct_of_mac: f64, cores: usize) -> String {
         match self.cpu {
             CpuUnit::PercentOfMac => format!("{pct_of_mac:.0} %"),
             CpuUnit::PerCore => format!("{:.0} %", pct_of_mac * cores.max(1) as f64),
         }
+    }
+
+    /// Swap the decimal point for a comma when asked to. Only ever fed numbers with units.
+    fn loc(&self, s: String) -> String {
+        if self.decimal_comma { s.replace('.', ",") } else { s }
     }
 
     /// Short form for the menu bar.
@@ -148,6 +162,19 @@ mod tests {
         assert_eq!(bits.rate(1_000_000.0), "8 Mbps");
         // memory is always bytes
         assert_eq!(bits.bytes(240_000_000), "240 MB");
+    }
+
+    #[test]
+    fn decimal_comma_is_opt_in() {
+        let es = Units { decimal_comma: true, ..Default::default() };
+        assert_eq!(es.bytes(3_070_000_000), "3,07 GB");
+        assert_eq!(es.rate(2_400_000.0), "2,4 MB/s");
+        assert_eq!(Units::default().bytes(3_070_000_000), "3.07 GB");
+        assert_eq!(es.watts(1.234, 2), "1,23 W");
+        assert_eq!(Units::default().watts(1.234, 2), "1.23 W");
+        assert_eq!(Units::default().watts(1.26, 1), "1.3 W");
+        // Never serialised: settings.json is unchanged.
+        assert!(!serde_json::to_string(&es).unwrap().contains("decimal"));
     }
 
     #[test]

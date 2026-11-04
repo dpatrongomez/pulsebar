@@ -151,6 +151,7 @@ impl<L: BundleLookup> Grouper<L> {
             // The root is the earliest-started process of the group (the main app process).
             if p.ppid <= 1 && Self::is_main_candidate(p, &g.app) {
                 g.root_pid = p.pid;
+                g.root_is_main = true;
             }
         }
         let mut v: Vec<AppGroup> = groups.into_values().collect();
@@ -192,6 +193,17 @@ mod tests {
             cpu_pct: 1.0,
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn root_is_main_only_with_a_real_main_process() {
+        let main = "/Applications/Foo.app/Contents/MacOS/Foo";
+        let helper = "/Applications/Foo.app/Contents/Library/LoginItems/FooHelper.app/Contents/MacOS/FooHelper";
+        let mut g = Grouper::with_lookup(FakeLookup, 501);
+        let with_main = g.group(&mut [p(10, 1, main, 1), p(11, 10, helper, 1)]);
+        assert!(with_main[0].root_is_main && with_main[0].root_pid == 10);
+        let only_helper = g.group(&mut [p(11, 1, helper, 1)]);
+        assert!(!only_helper[0].root_is_main);
     }
 
     #[test]

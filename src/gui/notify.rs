@@ -69,7 +69,7 @@ pub use mac::{deliver, install};
 #[cfg(not(target_os = "macos"))]
 pub fn install() {}
 #[cfg(not(target_os = "macos"))]
-pub fn deliver(_: &Alert) -> bool {
+pub fn deliver(_: &Alert, _: &crate::i18n::I18n) -> bool {
     false
 }
 
@@ -167,7 +167,7 @@ mod mac {
         UNUserNotificationCenter::currentNotificationCenter().setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
         // The centre keeps only a weak reference.
         std::mem::forget(delegate);
-        register_categories();
+        register_categories(&I18n::new(Settings::load().language.as_deref()));
     }
 
     fn category(id: &str, actions: &[Retained<UNNotificationAction>]) -> Retained<UNNotificationCategory> {
@@ -180,9 +180,10 @@ mod mac {
         )
     }
 
-    /// Titles follow the language in Settings, so this runs before each post as well.
-    fn register_categories() {
-        let i18n = I18n::new(Settings::load().language.as_deref());
+    /// Action titles are fixed when a category is registered, so this runs before each post as
+    /// well (with the language the daemon currently uses) and a language change applies to the
+    /// next notification.
+    fn register_categories(i18n: &I18n) {
         let act = |id: &str, key: &str, opts: UNNotificationActionOptions| {
             UNNotificationAction::actionWithIdentifier_title_options(&ns(id), &ns(&i18n.t(key)), opts)
         };
@@ -193,12 +194,12 @@ mod mac {
         UNUserNotificationCenter::currentNotificationCenter().setNotificationCategories(&NSSet::from_retained_slice(&cats));
     }
 
-    fn post(a: &Alert) {
-        register_categories();
+    fn post(a: &Alert, i18n: &I18n) {
+        register_categories(i18n);
         let content = UNMutableNotificationContent::new();
-        let title = a.title();
-        content.setTitle(&ns(title));
-        content.setBody(&ns(&a.message));
+        let (title, body) = (a.title(i18n), a.text(i18n));
+        content.setTitle(&ns(&title));
+        content.setBody(&ns(&body));
         content.setSound(Some(&UNNotificationSound::defaultSound()));
         let machine = a.app_key.is_empty();
         content.setCategoryIdentifier(&ns(if machine { CAT_MACHINE } else { CAT_APP }));
@@ -209,7 +210,6 @@ mod mac {
         unsafe { content.setUserInfo(&*(Retained::as_ptr(&info) as *const NSDictionary)) };
         let id = format!("pulsebar.{:?}.{}.{}", a.kind, a.app_key, a.at);
         let request = UNNotificationRequest::requestWithIdentifier_content_trigger(&ns(&id), &content, None);
-        let (title, body) = (title.to_string(), a.message.clone());
         let done = RcBlock::new(move |err: *mut NSError| {
             if !err.is_null() {
                 // Could not be queued: show it the old way rather than drop it.
@@ -222,44 +222,46 @@ mod mac {
     /// Post a native notification. Returns `false` (nothing posted, caller falls back to
     /// osascript) when unbundled. When authorisation is still undetermined it is requested now,
     /// and a denial falls back to osascript from the completion handler.
-    pub fn deliver(a: &Alert) -> bool {
+    pub fn deliver(a: &Alert, i18n: &I18n) -> bool {
         if !bundled() {
             return false;
         }
         let alert = a.clone();
+        let i18n = i18n.clone();
         let center = UNUserNotificationCenter::currentNotificationCenter();
         let got_settings = RcBlock::new(move |settings: NonNull<UNNotificationSettings>| {
             // SAFETY: the centre passes a live settings object for the duration of the call.
             let status = unsafe { settings.as_ref() }.authorizationStatus();
             if status == UNAuthorizationStatus::NotDetermined {
                 if AUTH_PENDING.swap(true, Ordering::SeqCst) {
-                    fallback(&alert);
+                    fallback(&alert, &i18n);
                     return;
                 }
                 let alert = alert.clone();
+                let i18n = i18n.clone();
                 let granted = RcBlock::new(move |ok: Bool, _err: *mut NSError| {
                     // Every completion (granted, denied or error) lands here first.
                     AUTH_PENDING.store(false, Ordering::SeqCst);
                     if ok.as_bool() {
-                        post(&alert);
+                        post(&alert, &i18n);
                     } else {
-                        fallback(&alert);
+                        fallback(&alert, &i18n);
                     }
                 });
                 UNUserNotificationCenter::currentNotificationCenter()
                     .requestAuthorizationWithOptions_completionHandler(UNAuthorizationOptions::Alert | UNAuthorizationOptions::Sound, &granted);
             } else if status == UNAuthorizationStatus::Denied {
-                fallback(&alert);
+                fallback(&alert, &i18n);
             } else {
-                post(&alert);
+                post(&alert, &i18n);
             }
         });
         center.getNotificationSettingsWithCompletionHandler(&got_settings);
         true
     }
 
-    fn fallback(a: &Alert) {
-        crate::alerts::notify(a.title(), &a.message);
+    fn fallback(a: &Alert, i18n: &I18n) {
+        crate::alerts::notify(&a.title(i18n), &a.text(i18n));
     }
 }
 
@@ -274,7 +276,7 @@ mod tests {
     }
 
     fn alert(app_key: &str) -> Alert {
-        Alert { kind: AlertKind::AppMemoryGrowth, app_key: app_key.into(), app_name: String::new(), message: "m".into(), at: 1 }
+        Alert { kind: AlertKind::AppMemoryGrowth, app_key: app_key.into(), app_name: String::new(), message: "m".into(), at: 1, key: String::new(), args: vec![] }
     }
 
     #[test]

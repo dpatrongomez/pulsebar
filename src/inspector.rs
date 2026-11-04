@@ -2,6 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::i18n::I18n;
 use crate::model::{Process, Snapshot};
 use crate::sys::{self, CodeSignInfo};
 use crate::units::{Units, format_duration};
@@ -106,40 +107,91 @@ pub fn inspect(s: &Snapshot, pid: i32, deep: bool) -> Option<ProcessDetail> {
     })
 }
 
-fn yn(b: bool) -> &'static str {
-    if b { "yes" } else { "no" }
+/// Plain-text card in English (`pulsebar process <pid>`).
+pub fn to_text(d: &ProcessDetail, u: &Units, cores: usize) -> String {
+    to_text_in(&I18n::english(), d, u, cores)
 }
 
-/// Plain-text card (Copy button, `pulsebar process <pid>`).
-pub fn to_text(d: &ProcessDetail, u: &Units, cores: usize) -> String {
+/// Plain-text card in `i18n`'s language (inspector panel and its Copy button). Labels are padded
+/// to the longest label of that language, so the columns line up whatever the wording; with
+/// English that is the same 14-column layout the CLI has always printed. Numbers go through
+/// `u` (and `i18n.num`) so one card never mixes "3,07 GB" with "1.2 s".
+pub fn to_text_in(i18n: &I18n, d: &ProcessDetail, u: &Units, cores: usize) -> String {
     let i = &d.identity;
     let x = &d.executable;
     let r = &d.resources;
     let s = &d.security;
-    let ports = if r.listening_ports.is_empty() {
-        "—".into()
-    } else {
-        r.listening_ports.iter().map(u16::to_string).collect::<Vec<_>>().join(", ")
-    };
-    let mut out = String::new();
-    out.push_str(&format!("{} — pid {}\n\n", d.name, i.pid));
-    out.push_str("IDENTITY\n");
-    out.push_str(&format!("  PID           {}\n  Parent        {} ({})\n", i.pid, i.parent_name, i.ppid));
-    out.push_str(&format!("  Parent chain  {}\n", if i.parent_chain.is_empty() { "—".into() } else { i.parent_chain.join(" ← ") }));
-    out.push_str(&format!("  Uptime        {}\n  User          {}\n  App           {}\n", format_duration(i.uptime_s), i.user, i.app));
-    out.push_str(&format!("  Bundle ID     {}\n  Version       {}\n\n", i.bundle_id.as_deref().unwrap_or("—"), i.version.as_deref().unwrap_or("—")));
-    out.push_str("SECURITY\n");
-    out.push_str(&format!("  Signed        {}\n  Identifier    {}\n  Team ID       {}\n", yn(s.signed), s.identifier.as_deref().unwrap_or("—"), s.team_id.as_deref().unwrap_or("—")));
-    out.push_str(&format!("  Authority     {}\n  Sandbox       {}\n  Hardened RT   {}\n", s.authority.as_deref().unwrap_or("—"), yn(s.sandboxed), yn(s.hardened_runtime)));
-    out.push_str(&format!("  Entitlements  {}\n\n", if s.entitlements.is_empty() { "—".into() } else { s.entitlements.join(", ") }));
-    out.push_str("EXECUTABLE\n");
-    out.push_str(&format!("  Path          {}\n  Architecture  {}\n", x.path, if x.architectures.is_empty() { "—".into() } else { x.architectures.join(", ") }));
-    out.push_str(&format!("  argv          {}\n  cwd           {}\n\n", x.argv.join(" "), if x.cwd.is_empty() { "—" } else { &x.cwd }));
-    out.push_str("RESOURCES\n");
-    out.push_str(&format!("  CPU           {}\n  Memory        {} (peak {})\n", u.cpu(r.cpu_pct, cores), u.bytes(r.mem_bytes), u.bytes(r.mem_peak)));
-    out.push_str(&format!("  CPU time      user {:.1} s · system {:.1} s\n", r.cpu_time_user_s, r.cpu_time_system_s));
-    out.push_str(&format!("  Disk          read {} · write {}\n  Energy        {:.2} W\n", u.rate(r.disk_read_bps), u.rate(r.disk_write_bps), r.energy_w));
-    out.push_str(&format!("  Open files    {}\n  Listening     {}\n", r.open_files.map(|n| n.to_string()).unwrap_or("—".into()), ports));
+    let dash = || "—".to_string();
+    let yn = |b: bool| i18n.t(if b { "insp.yes" } else { "insp.no" });
+    let list = |v: Vec<String>, sep: &str| if v.is_empty() { dash() } else { v.join(sep) };
+    let opt = |o: &Option<String>| o.clone().unwrap_or_else(dash);
+    let sections: Vec<(&str, Vec<(&str, String)>)> = vec![
+        (
+            "insp.identity",
+            vec![
+                ("insp.f.pid", i.pid.to_string()),
+                ("insp.f.parent", format!("{} ({})", i.parent_name, i.ppid)),
+                ("insp.f.parent_chain", list(i.parent_chain.clone(), " ← ")),
+                ("insp.f.uptime", format_duration(i.uptime_s)),
+                ("insp.f.user", i.user.clone()),
+                ("insp.f.app", i.app.clone()),
+                ("insp.f.bundle_id", opt(&i.bundle_id)),
+                ("insp.f.version", opt(&i.version)),
+            ],
+        ),
+        (
+            "insp.security",
+            vec![
+                ("insp.f.signed", yn(s.signed)),
+                ("insp.f.identifier", opt(&s.identifier)),
+                ("insp.f.team_id", opt(&s.team_id)),
+                ("insp.f.authority", opt(&s.authority)),
+                ("insp.f.sandbox", yn(s.sandboxed)),
+                ("insp.f.hardened", yn(s.hardened_runtime)),
+                ("insp.f.entitlements", list(s.entitlements.clone(), ", ")),
+            ],
+        ),
+        (
+            "insp.executable",
+            vec![
+                ("insp.f.path", x.path.clone()),
+                ("insp.f.arch", list(x.architectures.clone(), ", ")),
+                ("insp.f.argv", x.argv.join(" ")),
+                ("insp.f.cwd", if x.cwd.is_empty() { dash() } else { x.cwd.clone() }),
+            ],
+        ),
+        (
+            "insp.resources",
+            vec![
+                ("insp.f.cpu", u.cpu(r.cpu_pct, cores)),
+                ("insp.f.memory", i18n.tf("insp.memory_value", &[("mem", &u.bytes(r.mem_bytes)), ("peak", &u.bytes(r.mem_peak))])),
+                (
+                    "insp.f.cpu_time",
+                    i18n.tf(
+                        "insp.cpu_time_value",
+                        &[("user", &i18n.num(format!("{:.1}", r.cpu_time_user_s))), ("system", &i18n.num(format!("{:.1}", r.cpu_time_system_s)))],
+                    ),
+                ),
+                ("insp.f.disk", i18n.tf("insp.disk_value", &[("r", &u.rate(r.disk_read_bps)), ("w", &u.rate(r.disk_write_bps))])),
+                ("insp.f.energy", u.watts(r.energy_w, 2)),
+                ("insp.f.open_files", r.open_files.map(|n| n.to_string()).unwrap_or_else(dash)),
+                ("insp.f.listening", list(r.listening_ports.iter().map(u16::to_string).collect(), ", ")),
+            ],
+        ),
+    ];
+    let width = sections.iter().flat_map(|(_, rows)| rows.iter()).map(|(k, _)| i18n.t(k).chars().count()).max().unwrap_or(0) + 2;
+    let mut out = i18n.tf("insp.heading", &[("name", &d.name), ("pid", &i.pid.to_string())]);
+    out.push('\n');
+    for (title, rows) in &sections {
+        out.push('\n');
+        out.push_str(&i18n.t(title));
+        out.push('\n');
+        for (k, v) in rows {
+            let label = i18n.t(k);
+            let pad = width - label.chars().count();
+            out.push_str(&format!("  {label}{}{v}\n", " ".repeat(pad)));
+        }
+    }
     out
 }
 
@@ -219,5 +271,24 @@ mod tests {
         assert!(csv.contains("argv,node next dev --port 3000\n"));
         let txt = to_text(&d, &Units::default(), 8);
         assert!(txt.contains("Listening     3000"));
+
+        // The Spanish card is translated, lines up, and uses one number format throughout.
+        let es = I18n::new(Some("es"));
+        let mut d = d;
+        d.resources.mem_bytes = 3_070_000_000;
+        d.resources.mem_peak = 3_200_000_000;
+        d.resources.cpu_time_user_s = 1.2;
+        d.resources.energy_w = 1.234;
+        let u = Units { decimal_comma: true, ..Default::default() };
+        let t = to_text_in(&es, &d, &u, 8);
+        assert!(t.contains("IDENTIDAD\n") && t.contains("RECURSOS\n"), "{t}");
+        assert!(t.contains("3,07 GB (pico 3,20 GB)"), "{t}");
+        assert!(t.contains("usuario 1,2 s"), "{t}");
+        assert!(t.contains("1,23 W"), "{t}");
+        assert!(!t.contains("Memory") && !t.contains("peak"), "{t}");
+        let col = |label: &str, value: &str| t.lines().find(|l| l.starts_with(label)).and_then(|l| l.find(value));
+        assert!(col("  PID", "300").is_some());
+        assert_eq!(col("  PID", "300"), col("  Cadena de padres", "zsh"), "{t}");
+        assert_eq!(col("  PID", "300"), col("  Escuchando", "3000"), "{t}");
     }
 }

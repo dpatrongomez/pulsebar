@@ -99,17 +99,39 @@ pub fn read_alerts() -> Vec<Alert> {
     read_json(&paths::alerts_file())
 }
 
+/// Run `f` holding an exclusive advisory lock on `.files.lock`, so the read-modify-write
+/// cycles of `alerts.json` and `snoozes.json` don't interleave between threads (the sampler and
+/// the notification callbacks) or processes (agent and window). Each call opens its own
+/// descriptor, which is what makes `flock` exclude other threads of this process too.
+///
+/// Not re-entrant: calling it again from inside `f` would block forever, so never nest.
+fn with_files_lock<R>(f: impl FnOnce() -> R) -> R {
+    use std::os::fd::AsRawFd;
+    let _ = paths::ensure_dirs();
+    let lock = std::fs::File::create(paths::app_support().join(".files.lock")).ok();
+    if let Some(l) = &lock {
+        // SAFETY: plain syscall on a descriptor that stays open until `lock` is dropped.
+        unsafe { libc::flock(l.as_raw_fd(), libc::LOCK_EX) };
+    }
+    f() // released when `lock` is dropped (closing the descriptor)
+}
+
 pub fn dismiss_alert(a: &Alert) {
-    let mut v = read_alerts();
-    v.retain(|x| !(x.kind == a.kind && x.app_key == a.app_key && x.at == a.at));
-    write_json(&paths::alerts_file(), &v);
+    with_files_lock(|| {
+        let mut v = read_alerts();
+        v.retain(|x| !(x.kind == a.kind && x.app_key == a.app_key && x.at == a.at));
+        write_json(&paths::alerts_file(), &v);
+    });
 }
 
 pub fn snooze_alert(a: &Alert, until: i64) {
-    let mut v: Vec<Snooze> = read_json(&paths::snoozes_file());
-    v.retain(|s| s.until > crate::sys::now_s());
-    v.push(Snooze { kind: a.kind, app_key: a.app_key.clone(), until });
-    write_json(&paths::snoozes_file(), &v);
+    with_files_lock(|| {
+        let mut v: Vec<Snooze> = read_json(&paths::snoozes_file());
+        v.retain(|s| s.until > crate::sys::now_s());
+        v.push(Snooze { kind: a.kind, app_key: a.app_key.clone(), until });
+        write_json(&paths::snoozes_file(), &v);
+    });
+    // The lock is released above: `dismiss_alert` takes it again and flock can't nest.
     dismiss_alert(a);
 }
 
@@ -217,13 +239,15 @@ fn run(sh: Arc<Shared>, settings: Settings) {
                         alerts::notify_alert(a);
                     }
                 }
-                let mut all = read_alerts();
-                all.extend(fired);
-                let len = all.len();
-                if len > 50 {
-                    all.drain(..len - 50);
-                }
-                write_json(&paths::alerts_file(), &all);
+                with_files_lock(|| {
+                    let mut all = read_alerts();
+                    all.extend(fired);
+                    let len = all.len();
+                    if len > 50 {
+                        all.drain(..len - 50);
+                    }
+                    write_json(&paths::alerts_file(), &all);
+                });
             }
             if last_live.elapsed() >= Duration::from_secs(5) {
                 let _ = live::write(&snap);

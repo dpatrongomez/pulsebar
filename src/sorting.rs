@@ -2,6 +2,7 @@
 //! it can be unit-tested; the choice is persisted per tab in `Settings::list_sort`.
 
 use std::cmp::Ordering;
+use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
@@ -27,6 +28,19 @@ impl SortKey {
             RankMetric::Energy => SortKey::Energy,
             RankMetric::Disk => SortKey::Disk,
             RankMetric::Network => SortKey::Network,
+        }
+    }
+
+    /// Metric used to pick which apps make the top-N when sorting by this column, so a metric
+    /// column shows the real ranking. Name and PID have no metric: the tab's own top-N applies.
+    pub fn rank_metric(self) -> Option<RankMetric> {
+        match self {
+            SortKey::Cpu => Some(RankMetric::Cpu),
+            SortKey::Memory => Some(RankMetric::Memory),
+            SortKey::Energy => Some(RankMetric::Energy),
+            SortKey::Disk => Some(RankMetric::Disk),
+            SortKey::Network => Some(RankMetric::Network),
+            SortKey::Name | SortKey::Pid => None,
         }
     }
 
@@ -127,6 +141,31 @@ pub fn sort_procs(procs: &mut [&Process], spec: SortSpec) {
 pub fn follow_frozen(procs: &mut [&Process], order: &[i32]) {
     let pos = |pid: i32| order.iter().position(|x| *x == pid).unwrap_or(usize::MAX);
     procs.sort_by_key(|p| pos(p.pid));
+}
+
+/// Row order of the app list while the pointer is over it. Without this a refresh can re-rank
+/// the list between hover and click and slide another app's Quit button under the cursor
+/// (egui identifies those buttons by position).
+pub struct FrozenOrder {
+    pub metric: RankMetric,
+    pub apps: Vec<String>,
+    pub procs: HashMap<String, Vec<i32>>,
+    /// Sort the order was captured under; a different sort (header click) invalidates it.
+    pub apps_sort: SortSpec,
+    pub procs_sort: SortSpec,
+}
+
+impl FrozenOrder {
+    /// Whether this order is still valid for the tab metric and sorts being drawn now.
+    pub fn applies_to(&self, m: RankMetric, apps: SortSpec, procs: SortSpec) -> bool {
+        self.metric == m && self.apps_sort == apps && self.procs_sort == procs
+    }
+}
+
+/// Resolve frozen app keys against the current snapshot, keeping the frozen order. Apps that
+/// are new since (or gone) are not in `order`, so they only appear once the order is released.
+pub fn resolve_frozen_apps<'a>(order: &[String], apps: &'a [AppGroup]) -> Vec<&'a AppGroup> {
+    order.iter().filter_map(|k| apps.iter().find(|a| &a.key == k)).collect()
 }
 
 #[cfg(test)]
@@ -271,9 +310,43 @@ mod tests {
         let mut kept: Vec<&Process> = after.iter().collect();
         follow_frozen(&mut kept, &frozen);
         assert_eq!(pids(&kept), vec![10, 20, 40, 30, 50]);
-        // Clicking a header re-sorts immediately (the GUI drops the frozen order).
+        // Clicking a header re-sorts immediately: the sort change invalidates the frozen order.
         let mut resorted: Vec<&Process> = after.iter().collect();
         sort_procs(&mut resorted, spec.clicked(SortKey::Pid));
         assert_eq!(pids(&resorted), vec![10, 20, 30, 40, 50]);
+    }
+
+    fn frozen(m: RankMetric, apps: SortSpec, procs: SortSpec) -> FrozenOrder {
+        FrozenOrder { metric: m, apps: vec!["b".into(), "a".into()], procs: HashMap::new(), apps_sort: apps, procs_sort: procs }
+    }
+
+    #[test]
+    fn frozen_order_applies_only_to_the_sort_it_was_captured_under() {
+        let cpu = SortSpec::for_metric(RankMetric::Cpu);
+        let f = frozen(RankMetric::Cpu, cpu, cpu);
+        assert!(f.applies_to(RankMetric::Cpu, cpu, cpu), "same metric and sorts stays valid");
+        assert!(!f.applies_to(RankMetric::Cpu, cpu.clicked(SortKey::Cpu), cpu), "reversing the app sort invalidates it");
+        assert!(!f.applies_to(RankMetric::Cpu, cpu.clicked(SortKey::Name), cpu), "a new app column invalidates it");
+        assert!(!f.applies_to(RankMetric::Cpu, cpu, cpu.clicked(SortKey::Pid)), "a new process column invalidates it");
+        assert!(!f.applies_to(RankMetric::Memory, cpu, cpu), "another tab metric invalidates it");
+    }
+
+    #[test]
+    fn new_apps_do_not_join_the_frozen_list() {
+        let apps = [app("a", "Alpha", 1.0, 1), app("b", "Beta", 2.0, 2), app("new", "Newcomer", 99.0, 3)];
+        let got: Vec<&str> = resolve_frozen_apps(&["b".to_string(), "a".to_string()], &apps).iter().map(|a| a.key.as_str()).collect();
+        assert_eq!(got, vec!["b", "a"], "frozen order kept, newcomer left out");
+        // An app that has since disappeared is skipped rather than breaking the list.
+        let got = resolve_frozen_apps(&["gone".to_string(), "a".to_string()], &apps);
+        assert_eq!(got.len(), 1);
+    }
+
+    #[test]
+    fn metric_columns_rank_by_their_metric() {
+        for m in [RankMetric::Cpu, RankMetric::Memory, RankMetric::Energy, RankMetric::Disk, RankMetric::Network] {
+            assert_eq!(SortKey::from_metric(m).rank_metric(), Some(m));
+        }
+        assert_eq!(SortKey::Name.rank_metric(), None);
+        assert_eq!(SortKey::Pid.rank_metric(), None);
     }
 }

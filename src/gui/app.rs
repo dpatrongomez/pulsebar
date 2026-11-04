@@ -21,7 +21,7 @@ use crate::i18n::{I18n, LANGS};
 use crate::inspector::{self, ProcessDetail};
 use crate::model::*;
 use crate::settings::{MenuDisplay, NumberFont, PlanConfig, Retention, Settings, Tab, Theme};
-use crate::sorting::{self, SortKey, SortSpec};
+use crate::sorting::{self, FrozenOrder, SortKey, SortSpec};
 use crate::units::{CpuUnit, DataUnit, TempUnit, format_duration};
 use crate::{docker, limits, output, paths, projects, share_card, sys};
 
@@ -138,18 +138,6 @@ pub struct PulseApp {
     started: Option<Instant>,
     screenshot_requested: bool,
     series_cache: HashMap<String, (Instant, Vec<f64>)>,
-}
-
-/// Row order of the app list while the pointer is over it. Without this a refresh can re-rank
-/// the list between hover and click and slide another app's Quit button under the cursor
-/// (egui identifies those buttons by position).
-struct FrozenOrder {
-    metric: RankMetric,
-    apps: Vec<String>,
-    procs: HashMap<String, Vec<i32>>,
-    /// Sort the order was captured under; a different sort (header click) invalidates it.
-    apps_sort: SortSpec,
-    procs_sort: SortSpec,
 }
 
 fn local_midnight() -> i64 {

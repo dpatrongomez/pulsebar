@@ -99,6 +99,18 @@ fn sort_header(ui: &mut egui::Ui, id: impl std::hash::Hash, pos: egui::Pos2, rig
     resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked()
 }
 
+/// Below this list width the optional CPU / Memory columns are not painted.
+const MIN_WIDTH_FOR_EXTRAS: f32 = 560.0;
+
+/// Text of the last numeric cell of a process row: Disk / Network rate, else Energy.
+fn last_proc_cell(p: &Process, key: SortKey, u: &crate::units::Units) -> String {
+    match key {
+        SortKey::Disk => u.rate(p.disk_read_bps + p.disk_write_bps),
+        SortKey::Network => u.rate(p.net_rx_bps + p.net_tx_bps),
+        _ => watts(Some(p.energy_w)),
+    }
+}
+
 fn watts(v: Option<f64>) -> String {
     v.map(|w| if w < 1.0 { format!("{:.0} mW", w * 1000.0) } else { format!("{w:.1} W") }).unwrap_or("—".into())
 }
@@ -310,12 +322,22 @@ impl PulseApp {
         let app_sort = ls.apps.unwrap_or(SortSpec::for_metric(m));
         let proc_sort = ls.procs.unwrap_or(SortSpec::for_metric(m));
         // CPU and Memory side by side with the tab's own metric (which is always shown).
-        let extras: Vec<SortKey> = if ls.extra_columns { [SortKey::Cpu, SortKey::Memory].into_iter().filter(|k| *k != m_key).collect() } else { vec![] };
+        // Not painted (header and rows alike) when the list is too narrow for the name to fit.
+        let fits = ui.available_width() >= MIN_WIDTH_FOR_EXTRAS;
+        let extras: Vec<SortKey> = if ls.extra_columns && fits { [SortKey::Cpu, SortKey::Memory].into_iter().filter(|k| *k != m_key).collect() } else { vec![] };
+        // Disk and Network lists are ranked by their own metric, so their process lists show it
+        // in place of Energy (otherwise the default order could not be selected again).
+        let last_proc_key = if matches!(m, RankMetric::Disk | RankMetric::Network) { m_key } else { SortKey::Energy };
+        let last_proc_label = match last_proc_key {
+            SortKey::Disk => self.i18n.t("tab.disk"),
+            SortKey::Network => self.i18n.t("tab.network"),
+            _ => self.i18n.t("col.energy"),
+        };
         let mut app_click: Option<SortKey> = None;
         let mut proc_click: Option<SortKey> = None;
         let mut toggle_extras = false;
         // The frozen order only applies to the sort it was captured under.
-        let frozen_ok = self.frozen.as_ref().is_some_and(|f| f.metric == m && f.apps_sort == app_sort && f.procs_sort == proc_sort);
+        let frozen_ok = self.frozen.as_ref().is_some_and(|f| f.applies_to(m, app_sort, proc_sort));
         let mut shown_apps: Vec<String> = vec![];
         let mut shown_procs: HashMap<String, Vec<i32>> = HashMap::new();
         let danger = self.pal(ui.ctx()).danger;
@@ -362,11 +384,12 @@ impl PulseApp {
             ui.add_space(4.0);
             // While the pointer is over the list, keep last frame's order: values keep updating,
             // rows don't move. New apps appear once the pointer leaves.
-            // The list is the top `n` apps by the tab's metric, ordered by the chosen column.
+            // The list is the top `n` apps by the chosen metric column (the tab's metric when
+            // sorting by name or PID), ordered by that column.
             let top: Vec<&AppGroup> = match self.frozen.as_ref().filter(|_| frozen_ok) {
-                Some(f) => f.apps.iter().filter_map(|k| snap.apps.iter().find(|a| &a.key == k)).collect(),
+                Some(f) => sorting::resolve_frozen_apps(&f.apps, &snap.apps),
                 None => {
-                    let mut v = snap.top_apps(m, n);
+                    let mut v = snap.top_apps(app_sort.key.rank_metric().unwrap_or(m), n);
                     sorting::sort_apps(&mut v, app_sort);
                     v
                 }
@@ -452,7 +475,7 @@ impl PulseApp {
                     if sort_header(ui, ("proc-hdr-name", &a.key), egui::pos2(hin.left() + SUB_INDENT, hy), false, &self.i18n.t("col.process"), SortKey::Name, proc_sort) {
                         proc_click = Some(SortKey::Name);
                     }
-                    let proc_cols = [(SortKey::Pid, self.i18n.t("col.pid")), (SortKey::Cpu, self.i18n.t("tab.cpu")), (SortKey::Memory, self.i18n.t("tab.memory")), (SortKey::Energy, self.i18n.t("col.energy"))];
+                    let proc_cols = [(SortKey::Pid, self.i18n.t("col.pid")), (SortKey::Cpu, self.i18n.t("tab.cpu")), (SortKey::Memory, self.i18n.t("tab.memory")), (last_proc_key, last_proc_label.clone())];
                     for (x, (key, label)) in cols.iter().zip(proc_cols) {
                         if sort_header(ui, ("proc-hdr", &a.key, key), egui::pos2(*x, hy), true, &label, key, proc_sort) {
                             proc_click = Some(key);
@@ -477,7 +500,7 @@ impl PulseApp {
                         job.wrap = egui::text::TextWrapping { max_width: (cols[0] - 40.0 - name_x).max(20.0), max_rows: 1, break_anywhere: true, overflow_character: Some('…') };
                         let galley = ui.painter().layout_job(job);
                         ui.painter().galley(egui::pos2(name_x, cy - galley.size().y / 2.0), galley, text_col);
-                        let cells = [p.pid.to_string(), u.cpu(p.cpu_pct, cores), u.bytes(p.mem_bytes), watts(Some(p.energy_w))];
+                        let cells = [p.pid.to_string(), u.cpu(p.cpu_pct, cores), u.bytes(p.mem_bytes), last_proc_cell(p, last_proc_key, &u)];
                         for (i, (x, text)) in cols.iter().zip(cells).enumerate() {
                             ui.painter().text(egui::pos2(*x, cy), egui::Align2::RIGHT_CENTER, text, font.clone(), if i == 0 { weak } else { text_col });
                         }
@@ -501,8 +524,8 @@ impl PulseApp {
         // A confirmation dialog on top of the list doesn't count as hovering it.
         let over_list = ui.rect_contains_pointer(card.response.rect) && self.confirm.is_none() && action.is_none();
         self.frozen = over_list.then_some(FrozenOrder { metric: m, apps: shown_apps, procs: shown_procs, apps_sort: app_sort, procs_sort: proc_sort });
-        // Header clicks are explicit: persist the choice and drop the frozen order so the next
-        // frame re-sorts immediately, even with the pointer over the list.
+        // Header clicks are explicit: persist the choice. A changed sort invalidates the frozen
+        // order by itself (`FrozenOrder::applies_to`), so the next frame re-sorts immediately.
         if app_click.is_some() || proc_click.is_some() || toggle_extras {
             let entry = self.settings.list_sort.entry(self.tab).or_default();
             if let Some(k) = app_click {
@@ -513,8 +536,11 @@ impl PulseApp {
             }
             if toggle_extras {
                 entry.extra_columns = !entry.extra_columns;
+                // Hiding the CPU/Memory columns must not leave the list sorted by one of them.
+                if !entry.extra_columns && entry.apps.is_some_and(|s| s.key != SortKey::Name && s.key != m_key) {
+                    entry.apps = None;
+                }
             }
-            self.frozen = None;
             self.save_settings(ui.ctx());
             ui.ctx().request_repaint();
         }

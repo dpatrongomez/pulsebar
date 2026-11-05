@@ -1,7 +1,9 @@
 //! Small painter-based widgets: sparklines, line charts, meters, tiles; theme palettes.
 
-use eframe::egui::{self, Color32, Pos2, Rect, RichText, Sense, Stroke, Vec2};
+use eframe::egui::{self, Color32, FontId, Pos2, Rect, RichText, Sense, Stroke, Vec2};
+use eframe::emath::GuiRounding;
 
+use super::nothing;
 use crate::model::MetricKind;
 use crate::settings::{NumberFont, Settings, Theme};
 
@@ -33,14 +35,104 @@ pub fn palette(theme: Theme, dark: bool) -> Palette {
             danger: Color32::from_rgb(213, 94, 0),
             warn: Color32::from_rgb(240, 228, 66),
         },
+        Theme::Nothing => Palette {
+            accent: nothing::tokens(dark).text_display,
+            danger: nothing::ACCENT,
+            warn: nothing::WARNING,
+        },
     }
 }
 
 pub fn num(settings: &Settings, s: impl Into<String>, size: f32) -> RichText {
     let t = RichText::new(s).size(size);
-    match settings.number_font {
-        NumberFont::Monospace => t.monospace(),
-        NumberFont::Proportional => t,
+    if settings.theme == Theme::Nothing || settings.number_font == NumberFont::Monospace { t.monospace() } else { t }
+}
+
+/// The font [`num`] uses, for measuring and painting the same text.
+pub fn num_font(settings: &Settings, size: f32) -> FontId {
+    if settings.theme == Theme::Nothing || settings.number_font == NumberFont::Monospace { FontId::monospace(size) } else { FontId::proportional(size) }
+}
+
+/// The biggest number on a screen; dot-matrix in the Nothing theme.
+pub fn hero_num(ctx: &egui::Context, settings: &Settings, s: impl Into<String>, size: f32) -> RichText {
+    if nothing::is_active(ctx) { RichText::new(s).size(size).family(nothing::hero_family()) } else { num(settings, s, size) }
+}
+
+/// Font for numbers painted directly: Space Mono in the Nothing theme, one step smaller as it
+/// runs wider than the proportional face the layouts were sized for.
+pub fn data_font(ctx: &egui::Context, size: f32) -> FontId {
+    if nothing::is_active(ctx) { FontId::monospace(size - 1.0) } else { FontId::proportional(size) }
+}
+
+/// Size of an all-caps instrument label, whatever size the other themes use at that spot.
+const LABEL_SIZE: f32 = 11.0;
+const LABEL_SPACING: f32 = 0.8;
+
+/// Text and font of a label painted directly: all-caps Space Mono in the Nothing theme.
+pub fn label_parts(ctx: &egui::Context, s: &str, size: f32) -> (String, FontId) {
+    if nothing::is_active(ctx) { (s.to_uppercase(), FontId::monospace(LABEL_SIZE)) } else { (s.to_string(), FontId::proportional(size)) }
+}
+
+/// A weak label above or beside a value: all-caps Space Mono in the Nothing theme.
+pub fn caption(ctx: &egui::Context, s: &str, size: f32) -> RichText {
+    if nothing::is_active(ctx) {
+        RichText::new(s.to_uppercase()).monospace().size(LABEL_SIZE).extra_letter_spacing(LABEL_SPACING).weak()
+    } else {
+        RichText::new(s).size(size).weak()
+    }
+}
+
+/// [`caption`] for tight columns: one step smaller and without the extra tracking.
+pub fn small_caption(ctx: &egui::Context, s: &str, size: f32) -> RichText {
+    if nothing::is_active(ctx) { RichText::new(s.to_uppercase()).monospace().size(LABEL_SIZE - 1.0).weak() } else { RichText::new(s).size(size).weak() }
+}
+
+/// The unit next to a big number; label-sized in the Nothing theme.
+pub fn unit(ctx: &egui::Context, s: &str, size: f32) -> RichText {
+    if nothing::is_active(ctx) { RichText::new(s).monospace().size(LABEL_SIZE + 2.0).weak() } else { RichText::new(s).size(size).weak() }
+}
+
+/// The three memory kinds. Nothing tells them apart by opacity, not hue.
+pub fn memory_colors(theme: Theme, dark: bool) -> [Color32; 3] {
+    match theme {
+        Theme::Nothing => {
+            let c = nothing::tokens(dark).text_display;
+            [c, c.gamma_multiply(0.65), c.gamma_multiply(0.42)]
+        }
+        _ => [metric_color(theme, dark, MetricKind::Cpu), metric_color(theme, dark, MetricKind::Sound), metric_color(theme, dark, MetricKind::Network)],
+    }
+}
+
+/// (the "rest" of a breakdown, free space).
+pub fn muted_colors(theme: Theme, dark: bool) -> (Color32, Color32) {
+    match theme {
+        Theme::Nothing => {
+            let t = nothing::tokens(dark);
+            (t.text_display.gamma_multiply(0.24), t.border_visible)
+        }
+        _ if dark => (Color32::from_gray(110), Color32::from_gray(60)),
+        _ => (Color32::from_gray(170), Color32::from_gray(215)),
+    }
+}
+
+/// Square-ended blocks with 2 px gaps, filled from the left. Never rounds a non-zero value down to
+/// an empty bar. The instrument look of the Nothing theme.
+fn segments(ui: &egui::Ui, rect: Rect, frac: f64, color: Color32) {
+    if !ui.is_rect_visible(rect) {
+        return;
+    }
+    let (seg, gap) = (4.0, 2.0);
+    let n = ((rect.width() + gap) / (seg + gap)).floor().max(1.0) as usize;
+    let frac = frac.clamp(0.0, 1.0);
+    let filled = ((frac * n as f64).round() as usize).max(usize::from(frac > 0.0));
+    let w = (rect.width() - gap * (n - 1) as f32) / n as f32;
+    let empty = nothing::tokens(ui.visuals().dark_mode).border;
+    let ppp = ui.ctx().pixels_per_point();
+    let p = ui.painter();
+    for i in 0..n {
+        let x = rect.left() + i as f32 * (w + gap);
+        let block = Rect::from_min_max(Pos2::new(x.round_to_pixels(ppp), rect.top()), Pos2::new((x + w).round_to_pixels(ppp), rect.bottom()));
+        p.rect_filled(block, 0.0, if i < filled { color } else { empty });
     }
 }
 
@@ -97,7 +189,7 @@ pub fn history_chart_range(ui: &mut egui::Ui, i18n: &crate::i18n::I18n, pts: &[(
         }
         painter.add(egui::Shape::line(run.iter().map(|p| map(p.0, p.2)).collect(), Stroke::new(1.8, color)));
     }
-    painter.text(r.left_top(), egui::Align2::LEFT_TOP, fmt(hi / 1.1), egui::FontId::proportional(11.0), ui.visuals().weak_text_color());
+    painter.text(r.left_top(), egui::Align2::LEFT_TOP, fmt(hi / 1.1), data_font(ui.ctx(), 11.0), ui.visuals().weak_text_color());
     if let Some(pos) = resp.hover_pos() {
         let frac = ((pos.x - r.left()) / r.width()).clamp(0.0, 1.0) as f64;
         let t = t0 + (t1 - t0) * frac;
@@ -113,6 +205,10 @@ pub fn history_chart_range(ui: &mut egui::Ui, i18n: &crate::i18n::I18n, pts: &[(
 /// Horizontal fill meter 0..1.
 pub fn meter(ui: &mut egui::Ui, frac: f64, width: f32, color: Color32) {
     let (rect, _) = ui.allocate_exact_size(Vec2::new(width, 8.0), Sense::hover());
+    if nothing::is_active(ui.ctx()) {
+        segments(ui, rect, frac, color);
+        return;
+    }
     let p = ui.painter();
     p.rect_filled(rect, 4.0, ui.visuals().extreme_bg_color);
     let mut f = rect;
@@ -125,22 +221,39 @@ pub fn stacked_bar(ui: &mut egui::Ui, parts: &[(String, f64, Color32)], total: f
     let width = ui.available_width();
     let (rect, resp) = ui.allocate_exact_size(Vec2::new(width, 14.0), Sense::hover());
     let p = ui.painter();
-    p.rect_filled(rect, 4.0, ui.visuals().extreme_bg_color);
+    // Nothing: square ends, a gap between the parts, no rounded track.
+    let (radius, gap, track) = if nothing::is_active(ui.ctx()) { (0.0, 2.0, nothing::tokens(ui.visuals().dark_mode).border) } else { (4.0, 0.0, ui.visuals().extreme_bg_color) };
+    p.rect_filled(rect, radius, track);
     let total = total.max(parts.iter().map(|x| x.1).sum::<f64>()).max(1e-9);
     let mut x = rect.left();
     let mut tip = String::new();
     for (label, v, c) in parts {
         let w = rect.width() * (*v / total) as f32;
-        p.rect_filled(Rect::from_min_size(Pos2::new(x, rect.top()), Vec2::new(w, rect.height())), 0.0, *c);
+        p.rect_filled(Rect::from_min_size(Pos2::new(x, rect.top()), Vec2::new((w - gap).max(0.0), rect.height())), 0.0, *c);
         x += w;
         tip.push_str(&format!("{label}: {:.0} %\n", v / total * 100.0));
     }
     resp.on_hover_text(tip.trim_end());
 }
 
-/// Card background for the current light/dark mode.
-pub fn card_fill(dark: bool) -> Color32 {
+/// Card background of the default look; the themes install theirs as `Visuals::window_fill`.
+pub fn base_card_fill(dark: bool) -> Color32 {
     if dark { Color32::from_rgb(30, 30, 33) } else { Color32::WHITE }
+}
+
+/// Card background for the current theme and light/dark mode.
+pub fn card_fill(visuals: &egui::Visuals) -> Color32 {
+    visuals.window_fill
+}
+
+/// Cards have a hairline only in the Nothing theme, which separates surfaces with borders.
+pub fn card_stroke(ui: &egui::Ui) -> Stroke {
+    if nothing::is_active(ui.ctx()) { Stroke::new(1.0, nothing::tokens(ui.visuals().dark_mode).border) } else { Stroke::NONE }
+}
+
+/// A clickable or hero card's background, for cards laid out by hand.
+pub fn paint_card(ui: &egui::Ui, rect: Rect, fill: Color32) {
+    ui.painter().rect(rect, 16.0, fill, card_stroke(ui), egui::StrokeKind::Inside);
 }
 
 /// Window background behind the cards.
@@ -150,14 +263,14 @@ pub fn window_fill(dark: bool) -> Color32 {
 
 /// Card frame.
 pub fn card<R>(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
-    egui::Frame::new().fill(card_fill(ui.visuals().dark_mode)).corner_radius(14.0).inner_margin(14.0).show(ui, add).inner
+    egui::Frame::new().fill(card_fill(ui.visuals())).stroke(card_stroke(ui)).corner_radius(14.0).inner_margin(14.0).show(ui, add).inner
 }
 
 /// One hue per metric so each Overview card is recognisable at a glance. The colour-blind
 /// theme maps to Okabe–Ito hues and the monochrome theme to its accent.
 pub fn metric_color(theme: Theme, dark: bool, kind: MetricKind) -> Color32 {
     match theme {
-        Theme::Monochrome => palette(theme, dark).accent,
+        Theme::Monochrome | Theme::Nothing => palette(theme, dark).accent,
         Theme::ColorBlind => match kind {
             MetricKind::Cpu | MetricKind::Sound => Color32::from_rgb(0, 114, 178),
             MetricKind::Memory | MetricKind::Neural => Color32::from_rgb(204, 121, 167),
@@ -184,6 +297,25 @@ pub fn metric_color(theme: Theme, dark: bool, kind: MetricKind) -> Color32 {
 pub fn bars(ui: &mut egui::Ui, values: &[f64], size: Vec2, color: Color32, max: Option<f64>) -> egui::Response {
     let (resp, painter) = ui.allocate_painter(size, Sense::hover());
     let r = resp.rect;
+    if nothing::is_active(ui.ctx()) {
+        // Square columns on the bare card: each slot shows its remainder, like an LED bar graph.
+        let (bar_w, gap) = (4.0, 2.0);
+        let slots = ((r.width() + gap) / (bar_w + gap)).floor().max(1.0) as usize;
+        let shown = &values[values.len().saturating_sub(slots)..];
+        let hi = max.unwrap_or_else(|| shown.iter().cloned().fold(0.0, f64::max)).max(1e-9);
+        let empty = nothing::tokens(ui.visuals().dark_mode).border;
+        let x0 = r.right() - slots as f32 * (bar_w + gap) + gap;
+        let missing = slots - shown.len();
+        for i in 0..slots {
+            let x = x0 + i as f32 * (bar_w + gap);
+            painter.rect_filled(Rect::from_min_max(Pos2::new(x, r.top()), Pos2::new(x + bar_w, r.bottom())), 0.0, empty);
+            if let Some(v) = i.checked_sub(missing).map(|k| shown[k]) {
+                let h = (r.height() * (v / hi).clamp(0.0, 1.0) as f32).max(2.0);
+                painter.rect_filled(Rect::from_min_max(Pos2::new(x, r.bottom() - h), Pos2::new(x + bar_w, r.bottom())), 0.0, color);
+            }
+        }
+        return resp;
+    }
     painter.rect_filled(r, 8.0, color.gamma_multiply(0.14));
     let inner = r.shrink2(Vec2::new(8.0, 5.0));
     let (bar_w, gap) = (4.0, 3.0);
@@ -205,16 +337,33 @@ pub fn bars(ui: &mut egui::Ui, values: &[f64], size: Vec2, color: Color32, max: 
 pub fn icon_badge(ui: &mut egui::Ui, glyph: &str, color: Color32, size: f32) {
     let (r, _) = ui.allocate_exact_size(Vec2::splat(size), Sense::hover());
     let p = ui.painter();
-    p.rect_filled(r, size * 0.28, color.gamma_multiply(0.2));
+    // Nothing: no tinted tile behind the glyph.
+    if !nothing::is_active(ui.ctx()) {
+        p.rect_filled(r, size * 0.28, color.gamma_multiply(0.2));
+    }
     p.text(r.center(), egui::Align2::CENTER_CENTER, glyph, egui::FontId::proportional(size * 0.55), color);
 }
 
 /// Small rounded status pill ("✓ Normal").
 pub fn pill(ui: &mut egui::Ui, text: &str, color: Color32) {
+    if nothing::is_active(ui.ctx()) {
+        tag(ui, text, color);
+        return;
+    }
     let galley = ui.painter().layout_no_wrap(text.to_string(), egui::FontId::proportional(13.0), color);
     let size = galley.size() + Vec2::new(18.0, 8.0);
     let (r, _) = ui.allocate_exact_size(size, Sense::hover());
     ui.painter().rect_filled(r, r.height() / 2.0, color.gamma_multiply(0.16));
+    ui.painter().galley(r.center() - galley.size() / 2.0, galley, color);
+}
+
+/// Nothing's tag: an outline with a technical radius and all-caps data type, coloured text only.
+fn tag(ui: &mut egui::Ui, text: &str, color: Color32) {
+    let galley = ui.painter().layout_no_wrap(text.to_uppercase(), FontId::monospace(LABEL_SIZE), color);
+    let size = galley.size() + Vec2::new(12.0, 6.0);
+    let (r, _) = ui.allocate_exact_size(size, Sense::hover());
+    let border = nothing::tokens(ui.visuals().dark_mode).border_visible;
+    ui.painter().rect_stroke(r, 4.0, Stroke::new(1.0, border), egui::StrokeKind::Inside);
     ui.painter().galley(r.center() - galley.size() / 2.0, galley, color);
 }
 
@@ -229,10 +378,13 @@ pub fn dot(ui: &mut egui::Ui, color: Color32) {
 pub fn donut(ui: &mut egui::Ui, diameter: f32, parts: &[(f64, Color32)], big: &str, small: &str) {
     let (r, _) = ui.allocate_exact_size(Vec2::splat(diameter), Sense::hover());
     let p = ui.painter();
-    let thickness = diameter * 0.12;
+    // Nothing: a thin instrument gauge rather than a thick ring.
+    let nothing_on = nothing::is_active(ui.ctx());
+    let thickness = diameter * if nothing_on { 0.05 } else { 0.12 };
     let radius = diameter / 2.0 - thickness / 2.0;
     let c = r.center();
-    p.circle_stroke(c, radius, Stroke::new(thickness, ui.visuals().extreme_bg_color));
+    let track = if nothing_on { nothing::tokens(ui.visuals().dark_mode).border } else { ui.visuals().extreme_bg_color };
+    p.circle_stroke(c, radius, Stroke::new(thickness, track));
     let total: f64 = parts.iter().map(|x| x.0.max(0.0)).sum();
     if total > 0.0 {
         let tau = std::f32::consts::TAU;
@@ -254,8 +406,10 @@ pub fn donut(ui: &mut egui::Ui, diameter: f32, parts: &[(f64, Color32)], big: &s
     }
     let strong = ui.visuals().strong_text_color();
     let weak = ui.visuals().weak_text_color();
-    p.text(c - Vec2::new(0.0, 7.0), egui::Align2::CENTER_CENTER, big, egui::FontId::proportional(diameter * 0.15), strong);
-    p.text(c + Vec2::new(0.0, diameter * 0.1), egui::Align2::CENTER_CENTER, small, egui::FontId::proportional(diameter * 0.1), weak);
+    p.text(c - Vec2::new(0.0, 7.0), egui::Align2::CENTER_CENTER, big, data_font(ui.ctx(), diameter * 0.15), strong);
+    // Inside the ring a full-size all-caps label would touch it.
+    let (small, small_font) = if nothing_on { (small.to_uppercase(), FontId::monospace(9.0)) } else { (small.to_string(), FontId::proportional(diameter * 0.1)) };
+    p.text(c + Vec2::new(0.0, diameter * 0.1), egui::Align2::CENTER_CENTER, small, small_font, weak);
 }
 
 /// Area chart for the hero cards: faint horizontal grid, gradient fill, 2 px line.
@@ -276,25 +430,37 @@ pub fn area_chart(p: &egui::Painter, r: Rect, values: &[f64], color: Color32, ma
         .map(|(i, v)| Pos2::new(r.left() + r.width() * i as f32 / (n - 1) as f32, r.bottom() - r.height() * (v / hi).clamp(0.0, 1.0) as f32))
         .collect();
     // Gradient fill as a triangle strip: line colour fading to transparent at the bottom.
-    let mut mesh = egui::Mesh::default();
-    let top_c = color.gamma_multiply(0.35);
-    let bottom_c = color.gamma_multiply(0.02);
-    for (i, pt) in pts.iter().enumerate() {
-        mesh.colored_vertex(*pt, top_c);
-        mesh.colored_vertex(Pos2::new(pt.x, r.bottom()), bottom_c);
-        if i > 0 {
-            let k = (i * 2) as u32;
-            mesh.add_triangle(k - 2, k - 1, k);
-            mesh.add_triangle(k - 1, k, k + 1);
+    // The Nothing theme has no gradients: the bare line is the chart.
+    if !nothing::is_active(p.ctx()) {
+        let mut mesh = egui::Mesh::default();
+        let top_c = color.gamma_multiply(0.35);
+        let bottom_c = color.gamma_multiply(0.02);
+        for (i, pt) in pts.iter().enumerate() {
+            mesh.colored_vertex(*pt, top_c);
+            mesh.colored_vertex(Pos2::new(pt.x, r.bottom()), bottom_c);
+            if i > 0 {
+                let k = (i * 2) as u32;
+                mesh.add_triangle(k - 2, k - 1, k);
+                mesh.add_triangle(k - 1, k, k + 1);
+            }
         }
+        p.add(egui::Shape::mesh(mesh));
     }
-    p.add(egui::Shape::mesh(mesh));
     p.add(egui::Shape::line(pts, Stroke::new(2.0, color)));
 }
 
 /// Thin rounded progress bar (5 px) used in lists.
 pub fn thin_meter(ui: &mut egui::Ui, frac: f64, width: f32, color: Color32) {
     let (rect, _) = ui.allocate_exact_size(Vec2::new(width, 5.0), Sense::hover());
+    paint_thin_meter(ui, rect, frac, color);
+}
+
+/// [`thin_meter`] in a rect laid out by the caller.
+pub fn paint_thin_meter(ui: &egui::Ui, rect: Rect, frac: f64, color: Color32) {
+    if nothing::is_active(ui.ctx()) {
+        segments(ui, rect, frac, color);
+        return;
+    }
     let p = ui.painter();
     p.rect_filled(rect, 2.5, ui.visuals().extreme_bg_color);
     let mut f = rect;
@@ -304,6 +470,10 @@ pub fn thin_meter(ui: &mut egui::Ui, frac: f64, width: f32, color: Color32) {
 
 /// Small tinted chip ("8 P", "Playing").
 pub fn chip(ui: &mut egui::Ui, text: &str, color: Color32) {
+    if nothing::is_active(ui.ctx()) {
+        tag(ui, text, color);
+        return;
+    }
     let galley = ui.painter().layout_no_wrap(text.to_string(), egui::FontId::proportional(12.5), color);
     let size = galley.size() + Vec2::new(14.0, 6.0);
     let (r, _) = ui.allocate_exact_size(size, Sense::hover());

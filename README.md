@@ -124,6 +124,15 @@ command (`tests/fixtures/snapshot.json`); MCP protocol and data-scoping tests.
   logs include the real %; Copilot/Cursor are manual entry.
 - **Localisation** covers tab names and common labels in 12 languages via an in-code table.
 - Only tested on Apple silicon; Intel builds compile into the universal binary, but IOReport power isn't available on Intel.
+- **Nothing theme** (Settings → Appearance) styles the main window only. The menu bar and exported
+  share cards keep their own look, and the tab icons are the same glyphs as in the other themes.
+
+## Fonts
+
+The Nothing theme embeds Space Grotesk, Space Mono and Doto (`assets/fonts`), all under the SIL Open
+Font License; the licences sit next to the fonts and ship in the app bundle. Space Grotesk and Doto
+are static instances of the Google Fonts variable files (egui only renders a font's default
+instance), and Doto is subset to Latin. They are loaded only while the theme is on.
 
 ## History storage and per-app series
 

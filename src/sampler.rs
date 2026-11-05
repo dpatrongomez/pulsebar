@@ -106,8 +106,11 @@ impl Engine {
         } else {
             self.last_procs.clone().unwrap_or_default()
         };
-        self.machine.disk.read_bps = processes.iter().map(|p| p.disk_read_bps).sum();
-        self.machine.disk.write_bps = processes.iter().map(|p| p.disk_write_bps).sum();
+        // On Linux the disk collector has the system-wide total (see `DiskCollector`).
+        if !cfg!(target_os = "linux") {
+            self.machine.disk.read_bps = processes.iter().map(|p| p.disk_read_bps).sum();
+            self.machine.disk.write_bps = processes.iter().map(|p| p.disk_write_bps).sum();
+        }
         self.tracker.update(&processes, now);
         fill_audio_apps(&mut self.machine.audio, &processes);
 

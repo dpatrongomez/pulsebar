@@ -2,12 +2,12 @@
 
 # PulseBar
 
-An app-centric activity monitor and process inspector for macOS 15+, written in Rust, aimed at
-developers who run AI agents, dev servers and Docker. Every metric is attributed to the
+An app-centric activity monitor and process inspector for macOS 15+ and Linux, written in Rust,
+aimed at developers who run AI agents, dev servers and Docker. Every metric is attributed to the
 **application** responsible for it ("922 processes → 62 apps"), and the same data is exposed to
-the menu bar, a main window, a CLI and an (opt-in) MCP server.
+the menu bar (status icons on Linux), a main window, a CLI and an (opt-in) MCP server.
 
-**Privacy:** everything is computed on the Mac. The code base opens no TCP connections; Docker is a
+**Privacy:** everything is computed on your machine. The code base opens no TCP connections; Docker is a
 local unix socket; AI-plan usage is read from the agents' own local logs. The only two permitted
 network calls (update check, licence validation) live in `src/net_policy.rs` and are off unless
 enabled. No telemetry, no account, no analytics.
@@ -110,6 +110,37 @@ fixtures), grouping (Chrome → 1 row × 96 processes), projects/idle detection,
 pacing, Docker, history buckets/retention, alert rules (including no false positive for a
 one-minute batch job), confirmation gating; golden output + JSON Schema validation for every CLI
 command (`tests/fixtures/snapshot.json`); MCP protocol and data-scoping tests.
+
+## Linux
+
+```sh
+make install-linux     # binary, launcher and icon under ~/.local (PREFIX=… to change)
+pulsebar window        # the window; `pulsebar app` also runs the status icons
+```
+
+Building needs Rust and a C compiler (`build-essential`); `cargo build --no-default-features` gives
+a CLI/MCP-only binary with no GUI dependencies. The window needs OpenGL and X11 or Wayland.
+
+What each part reads, and what it degrades to when the source is missing:
+
+| Area | Source | Without it |
+|---|---|---|
+| CPU, memory, disk, processes, ports | `/proc`, `/sys` | always available |
+| App grouping | `.desktop` files and systemd units | groups by executable name |
+| Per-app network | `ss` (iproute2) | blank; only your own processes' sockets are visible |
+| GPU | `nvidia-smi`, else amdgpu in sysfs | Intel shows the name only, no load |
+| CPU power | RAPL | usually root-only: power comes from the battery instead |
+| Temperatures, fans, battery | hwmon, `power_supply` | "not available" |
+| Sound | `pactl` (PulseAudio or PipeWire) | "not available" |
+| Bluetooth | `bluetoothctl` | "not available" |
+| Status icons | StatusNotifierItem over D-Bus | stock GNOME needs the AppIndicator extension; otherwise `pulsebar app` opens the window |
+| Notifications | `notify-send` | no notification; alerts still show in the window |
+
+Differences from macOS: there is no per-process energy counter, so the GPU and Battery lists rank
+by CPU and the Overview shows CPU by app; there is no Neural Engine, so its tab is hidden; there are
+no code signatures, so the inspector omits them; per-process disk I/O is only visible for your own
+processes (the system total still counts everyone's); and share cards stay SVG, with no PNG
+conversion. App icons are read from PNG files, so apps with only an SVG icon get a letter tile.
 
 ## Known limitations
 

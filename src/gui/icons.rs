@@ -1,5 +1,6 @@
 //! App icons: the bundle's .icns is converted once to a 64 px PNG with `sips` (cached in
-//! ~/Library/Caches/PulseBar/icons) on a worker thread, then uploaded as an egui texture.
+//! ~/Library/Caches/PulseBar/icons) on a worker thread, then uploaded as an egui texture. Linux
+//! apps are desktop entries: their PNG icon is read directly, scaled down if large.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -30,7 +31,19 @@ fn icns_path(bundle: &str) -> Option<PathBuf> {
     p.exists().then_some(p)
 }
 
+/// The icon of a desktop entry, at most 64 px like the macOS ones.
+fn load_desktop(desktop: &str) -> Option<(Vec<u8>, u32, u32)> {
+    let img = image::open(crate::linux::desktop_icon_png(desktop)?).ok()?;
+    let img = if img.width() > 64 || img.height() > 64 { img.thumbnail(64, 64) } else { img };
+    let img = img.to_rgba8();
+    let (w, h) = img.dimensions();
+    Some((img.into_raw(), w, h))
+}
+
 fn load(bundle: &str) -> Option<(Vec<u8>, u32, u32)> {
+    if bundle.ends_with(".desktop") {
+        return load_desktop(bundle);
+    }
     let dir = cache_dir();
     std::fs::create_dir_all(&dir).ok()?;
     let hash = bundle.bytes().fold(1469598103934665603u64, |h, b| (h ^ b as u64).wrapping_mul(1099511628211));

@@ -51,7 +51,9 @@ fn tables() {
     golden("projects.txt", &output::projects(&s, &u));
     golden("agents.txt", &output::agents(&s, &u));
     golden("limits.txt", &output::limits(&s));
-    golden("process_702.txt", &output::process(&s, 702, &u, false).unwrap());
+    // Code signing and per-process energy don't exist on Linux.
+    let process_golden = if cfg!(target_os = "linux") { "process_702_linux.txt" } else { "process_702.txt" };
+    golden(process_golden, &output::process(&s, 702, &u, false).unwrap());
 }
 
 #[test]

@@ -1,0 +1,26 @@
+node — pid 702
+
+IDENTITY
+  PID           702
+  Parent        zsh (701)
+  Parent chain  zsh (701) ← Terminal (700) ← launchd (1)
+  Uptime        3 h 0 min
+  User          dpatrongomez
+  App           Terminal
+  Bundle ID     com.apple.Terminal
+  Version       2.14
+
+EXECUTABLE
+  Path          /usr/bin/node
+  Architecture  —
+  argv          node next dev --port 4322
+  cwd           /Users/me/code/storefront-web
+
+RESOURCES
+  CPU           0 %
+  Memory        458 MB (peak 458 MB)
+  CPU time      user 0.0 s · system 0.0 s
+  Disk          read 0 B/s · write 0 B/s
+  Energy        —
+  Open files    —
+  Listening     4322

@@ -223,6 +223,8 @@ impl PulseApp {
                                     widgets::chip(ui, &self.i18n.t("insp.f.hardened"), pal.accent);
                                 }
                             }
+                            // Linux has no code signatures to report, so "unsigned" would be noise.
+                            Some(_) if cfg!(not(target_os = "macos")) => {}
                             Some(_) if st.sign_rx.is_none() => widgets::chip(ui, &format!("{}: {}", self.i18n.t("detail.signature"), self.i18n.t("detail.unsigned")), pal.warn),
                             _ => {
                                 ui.label(RichText::new(self.i18n.t("insp.checking")).size(12.5).weak());

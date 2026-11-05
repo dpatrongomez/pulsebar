@@ -101,6 +101,10 @@ fn sort_header(ui: &mut egui::Ui, id: impl std::hash::Hash, pos: egui::Pos2, rig
     resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked()
 }
 
+/// What the GPU and Battery lists rank by. Linux has no per-process energy counter, so ranking
+/// by it would order the list by nothing.
+const ENERGY_OR_CPU: RankMetric = if cfg!(target_os = "linux") { RankMetric::Cpu } else { RankMetric::Energy };
+
 /// Below this list width the optional CPU / Memory columns are not painted.
 const MIN_WIDTH_FOR_EXTRAS: f32 = 560.0;
 
@@ -109,7 +113,8 @@ fn last_proc_cell(i18n: &I18n, p: &Process, key: SortKey, u: &crate::units::Unit
     match key {
         SortKey::Disk => u.rate(p.disk_read_bps + p.disk_write_bps),
         SortKey::Network => u.rate(p.net_rx_bps + p.net_tx_bps),
-        _ => watts(i18n, Some(p.energy_w)),
+        // Linux has no per-process energy counter: a dash, not a misleading 0 mW.
+        _ => watts(i18n, (!cfg!(target_os = "linux")).then_some(p.energy_w)),
     }
 }
 
@@ -753,7 +758,7 @@ impl PulseApp {
         };
         let tiles = vec![
             Tile::text("▣", self.t("st.user"), u.cpu(c.user_pct, cores), self.t("tl.your_apps")),
-            Tile::text("▣", self.t("st.system"), u.cpu(c.system_pct, cores), "macOS"),
+            Tile::text("▣", self.t("st.system"), u.cpu(c.system_pct, cores), crate::grouping::SYSTEM_NAME),
             Tile::new("⚡", self.t("tl.cores"), cores.to_string(), chips),
             self.top_app_tile(snap, RankMetric::Cpu, "tl.top_app"),
         ];
@@ -936,10 +941,10 @@ impl PulseApp {
             Tile::text("🖥", self.t("gpu.memory"), if g.vram_used > 0 { u.bytes(g.vram_used) } else { "—".into() }, if g.vram_total > 0 { self.tf("tl.of", &[("v", &u.bytes(g.vram_total))]) } else { self.t("gpu.shared") }),
             Tile::text("⚡", self.t("st.power"), watts(&self.i18n, g.power_w.or(snap.machine.power.gpu_w)), self.t("gpu.package")),
             Tile::text("🖥", self.t("temperature"), s.gpu_temp_c.map(|t| u.temp(t)).unwrap_or("—".into()), self.t("gpu.die")),
-            self.top_app_tile(snap, RankMetric::Energy, "tl.top_energy_app"),
+            self.top_app_tile(snap, ENERGY_OR_CPU, "tl.top_energy_app"),
         ];
         self.tiles(ui, MetricKind::Gpu, tiles);
-        self.app_list(ui, snap, RankMetric::Energy, 15, "gpu.list_title");
+        self.app_list(ui, snap, ENERGY_OR_CPU, 15, "gpu.list_title");
     }
 
     pub(super) fn neural(&mut self, ui: &mut egui::Ui, snap: &Arc<Snapshot>) {
@@ -994,7 +999,7 @@ impl PulseApp {
             Tile::text("🔋", self.t("temperature"), b.temperature_c.map(|t| u.temp(t)).unwrap_or("—".into()), self.t("battery.pack")),
         ];
         self.tiles(ui, MetricKind::Battery, tiles);
-        self.app_list(ui, snap, RankMetric::Energy, 25, "hist.energy");
+        self.app_list(ui, snap, ENERGY_OR_CPU, 25, "hist.energy");
     }
 
     pub(super) fn sound(&mut self, ui: &mut egui::Ui, snap: &Arc<Snapshot>) {
@@ -1104,7 +1109,8 @@ impl PulseApp {
                 ui.label(RichText::new(self.t("bt.no_devices")).weak());
             }
             ui.add_space(4.0);
-            open_settings = ui.button(self.t("bt.settings")).clicked();
+            // A deep link into System Settings: Linux desktops have no common equivalent.
+            open_settings = cfg!(target_os = "macos") && ui.button(self.t("bt.settings")).clicked();
         });
         if open_settings {
             let _ = std::process::Command::new("/usr/bin/open").arg("x-apple.systempreferences:com.apple.BluetoothSettings").spawn();

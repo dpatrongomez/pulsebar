@@ -180,7 +180,7 @@ impl<S: SnapshotSource> Server<S> {
                     "protocolVersion": requested,
                     "capabilities": {"tools": {"listChanged": false}},
                     "serverInfo": {"name": "pulsebar", "title": "PulseBar", "version": env!("CARGO_PKG_VERSION")},
-                    "instructions": "Local Mac activity data grouped by app. Read-only, except pulsebar_request_quit which always requires the user's approval in the PulseBar window."
+                    "instructions": "Local machine activity data grouped by app. Read-only, except pulsebar_request_quit which always requires the user's approval in the PulseBar window."
                 }))
             }
             "ping" => Ok(json!({})),

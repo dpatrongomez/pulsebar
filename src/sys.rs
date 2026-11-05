@@ -1,6 +1,6 @@
-//! Thin, safe wrappers over macOS system interfaces (libproc, mach host statistics) plus a
-//! bounded subprocess helper for the few tools we shell out to (lsof, codesign, ioreg…).
-//! Non-macOS builds compile with stubs so the pure logic stays testable anywhere.
+//! Thin, safe wrappers over system interfaces (libproc and mach host statistics on macOS, see
+//! `crate::linux` for Linux) plus a bounded subprocess helper for the few tools we shell out to
+//! (lsof, codesign, ioreg, ss, pactl…).
 #![allow(deprecated)] // libc's mach_* items point at the mach2 crate; they are fine here.
 
 use std::collections::HashMap;
@@ -28,9 +28,30 @@ pub fn run(cmd: &str, args: &[&str], timeout: Duration) -> Option<String> {
     run_full(cmd, args, timeout).map(|(o, _)| o)
 }
 
+/// [`run`] with extra environment variables.
+pub fn run_env(cmd: &str, args: &[&str], timeout: Duration, env: &[(&str, &str)]) -> Option<String> {
+    run_full_env(cmd, args, timeout, env).map(|(o, _)| o)
+}
+
 pub fn run_full(cmd: &str, args: &[&str], timeout: Duration) -> Option<(String, String)> {
-    let mut child = Command::new(cmd)
+    run_full_env(cmd, args, timeout, &[])
+}
+
+fn run_full_env(cmd: &str, args: &[&str], timeout: Duration, env: &[(&str, &str)]) -> Option<(String, String)> {
+    let mut command = Command::new(cmd);
+    // A one-shot CLI run can exit while a worker still waits on a tool that hangs, and nothing
+    // would ever end that tool. Have the kernel kill it when we die.
+    #[cfg(target_os = "linux")]
+    unsafe {
+        use std::os::unix::process::CommandExt;
+        command.pre_exec(|| {
+            libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL);
+            Ok(())
+        });
+    }
+    let mut child = command
         .args(args)
+        .envs(env.iter().copied())
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -146,8 +167,8 @@ pub fn rusage(pid: i32) -> Option<RUsage> {
 }
 
 #[cfg(not(target_os = "macos"))]
-pub fn rusage(_pid: i32) -> Option<RUsage> {
-    None
+pub fn rusage(pid: i32) -> Option<RUsage> {
+    crate::linux::rusage(pid)
 }
 
 /// Number of open file descriptors (PROC_PIDLISTFDS).
@@ -165,8 +186,8 @@ pub fn open_fd_count(pid: i32) -> Option<usize> {
 }
 
 #[cfg(not(target_os = "macos"))]
-pub fn open_fd_count(_pid: i32) -> Option<usize> {
-    None
+pub fn open_fd_count(pid: i32) -> Option<usize> {
+    crate::linux::open_fd_count(pid)
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -197,7 +218,7 @@ pub fn host_cpu_ticks() -> Option<[u64; 4]> {
 
 #[cfg(not(target_os = "macos"))]
 pub fn host_cpu_ticks() -> Option<[u64; 4]> {
-    None
+    crate::linux::host_cpu_ticks()
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -235,7 +256,7 @@ pub fn vm_breakdown() -> Option<VmBreakdown> {
 
 #[cfg(not(target_os = "macos"))]
 pub fn vm_breakdown() -> Option<VmBreakdown> {
-    None
+    crate::linux::vm_breakdown()
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -258,6 +279,9 @@ pub fn outermost_bundle(exe: &str) -> Option<String> {
 }
 
 pub fn read_bundle(bundle_path: &str) -> BundleInfo {
+    if bundle_path.ends_with(".desktop") {
+        return crate::linux::read_desktop_info(bundle_path);
+    }
     let plist_path = Path::new(bundle_path).join("Contents/Info.plist");
     let fallback_name = Path::new(bundle_path)
         .file_stem()
@@ -282,6 +306,8 @@ pub fn read_bundle(bundle_path: &str) -> BundleInfo {
 #[derive(Default)]
 pub struct BundleCache {
     map: HashMap<String, BundleInfo>,
+    /// Linux: which desktop entry a process belongs to, and when it was last scanned.
+    pub desktop: Option<(Instant, crate::linux::DesktopIndex)>,
 }
 
 impl BundleCache {
@@ -319,6 +345,13 @@ pub fn parse_lsof_listen(out: &str) -> Vec<ListeningPort> {
 }
 
 /// TCP listening sockets of the current user's processes.
+#[cfg(not(target_os = "macos"))]
+pub fn listening_ports() -> Vec<ListeningPort> {
+    crate::linux::listening_ports()
+}
+
+/// TCP listening sockets of the current user's processes.
+#[cfg(target_os = "macos")]
 pub fn listening_ports() -> Vec<ListeningPort> {
     let uid = current_uid().to_string();
     run("/usr/sbin/lsof", &["-nP", "-iTCP", "-sTCP:LISTEN", "-a", "-u", &uid, "-FpcnP"], Duration::from_secs(4))
@@ -383,6 +416,12 @@ pub fn codesign_info(path: &str) -> CodeSignInfo {
     info
 }
 
+#[cfg(not(target_os = "macos"))]
+pub fn executable_archs(path: &str) -> Vec<String> {
+    crate::linux::executable_archs(path)
+}
+
+#[cfg(target_os = "macos")]
 pub fn executable_archs(path: &str) -> Vec<String> {
     run("/usr/bin/lipo", &["-archs", path], Duration::from_secs(3))
         .map(|s| s.split_whitespace().map(str::to_string).collect())
@@ -434,12 +473,48 @@ pub fn responsible_pid(pid: i32) -> i32 {
     }
 }
 
+/// The desktop app's unit name a process runs in (Linux; see `linux::process_unit`).
+pub fn app_hint(pid: i32) -> Option<String> {
+    if cfg!(target_os = "linux") { crate::linux::process_unit(pid) } else { None }
+}
+
+/// Open a terminal running `args`. macOS drives Terminal.app; Linux tries `$TERMINAL`, then the
+/// Debian alternative, then the common emulators.
+pub fn open_in_terminal(args: &[String]) {
+    #[cfg(target_os = "macos")]
+    {
+        let quoted: Vec<String> = args.iter().map(|a| format!("'{a}'")).collect();
+        let script = format!("tell application \"Terminal\" to do script \"{}\"", quoted.join(" "));
+        let _ = Command::new("/usr/bin/osascript").args(["-e", &script]).spawn();
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let user = std::env::var("TERMINAL").ok();
+        let known = ["x-terminal-emulator", "gnome-terminal", "konsole", "xfce4-terminal", "alacritty", "kitty", "xterm"];
+        for term in user.as_deref().into_iter().chain(known) {
+            // gnome-terminal has deprecated `-e`; the others all take it.
+            let flag = if term.ends_with("gnome-terminal") { "--" } else { "-e" };
+            if Command::new(term).arg(flag).args(args).stdout(Stdio::null()).stderr(Stdio::null()).spawn().is_ok() {
+                return;
+            }
+        }
+    }
+}
+
 pub fn pid_alive(pid: i32) -> bool {
     unsafe { libc::kill(pid, 0) == 0 }
 }
 
 /// Performance / efficiency logical core counts on Apple silicon (`hw.perflevel{0,1}`),
 /// read once. `None` on Intel or when the keys don't exist.
+#[cfg(not(target_os = "macos"))]
+pub fn perf_levels() -> Option<(usize, usize)> {
+    None
+}
+
+/// Performance / efficiency logical core counts on Apple silicon (`hw.perflevel{0,1}`),
+/// read once. `None` on Intel or when the keys don't exist.
+#[cfg(target_os = "macos")]
 pub fn perf_levels() -> Option<(usize, usize)> {
     static CACHE: std::sync::OnceLock<Option<(usize, usize)>> = std::sync::OnceLock::new();
     *CACHE.get_or_init(|| {

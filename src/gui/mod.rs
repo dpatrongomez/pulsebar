@@ -8,6 +8,7 @@ mod icons;
 pub mod notify;
 mod shortcuts;
 mod loc;
+mod nothing;
 pub mod tray;
 mod widgets;
 

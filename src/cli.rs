@@ -14,7 +14,7 @@ use crate::units::{DataUnit, TempUnit, Units};
 use crate::{history, live, login_item, output, paths, projects, sampler, share_card, sys, views};
 
 #[derive(Parser, Debug)]
-#[command(name = "pulsebar", version, about = "App-centric activity monitor for macOS developers")]
+#[command(name = "pulsebar", version, about = "App-centric activity monitor for developers on macOS and Linux")]
 pub struct Cli {
     /// Machine-readable JSON output.
     #[arg(long, global = true)]

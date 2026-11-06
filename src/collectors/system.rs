@@ -117,11 +117,13 @@ impl MetricCollector for MemoryCollector {
 pub struct DiskCollector {
     disks: Disks,
     ticks: u64,
+    /// Linux: last system-wide I/O counters, for throughput.
+    prev_io: Option<(Instant, (u64, u64))>,
 }
 
 impl DiskCollector {
     pub fn new() -> Self {
-        Self { disks: Disks::new_with_refreshed_list(), ticks: 0 }
+        Self { disks: Disks::new_with_refreshed_list(), ticks: 0, prev_io: None }
     }
 }
 
@@ -131,8 +133,13 @@ impl Default for DiskCollector {
     }
 }
 
+/// Volumes a person thinks of as theirs: the root disk, external drives, and on Linux a separate
+/// `/home` or a mounted data disk. Skips system mounts such as `/boot` and snap loop images.
 pub fn is_user_volume(mount: &str) -> bool {
-    mount == "/" || (mount.starts_with("/Volumes/") && !mount.starts_with("/Volumes/com.apple"))
+    mount == "/"
+        || mount == "/home"
+        || (mount.starts_with("/Volumes/") && !mount.starts_with("/Volumes/com.apple"))
+        || ["/mnt/", "/media/", "/run/media/"].iter().any(|p| mount.starts_with(p))
 }
 
 impl MetricCollector for DiskCollector {
@@ -140,9 +147,21 @@ impl MetricCollector for DiskCollector {
         MetricKind::Disk
     }
 
-    /// Volumes only. Throughput (`read_bps`/`write_bps`) is filled by the sampler from the
-    /// per-process I/O counters, which also gives per-app attribution.
+    /// Volumes. On macOS throughput (`read_bps`/`write_bps`) is filled by the sampler from the
+    /// per-process I/O counters, which also gives per-app attribution. Linux hides other users'
+    /// counters, so there the total comes from the kernel's per-disk statistics.
     fn collect(&mut self, out: &mut MachineMetrics) {
+        if cfg!(target_os = "linux")
+            && let Some(cur) = crate::linux::disk_counters()
+        {
+            let now = Instant::now();
+            if let Some((t0, (r0, w0))) = self.prev_io {
+                let dt = now.duration_since(t0).as_secs_f64().max(0.05);
+                out.disk.read_bps = cur.0.saturating_sub(r0) as f64 / dt;
+                out.disk.write_bps = cur.1.saturating_sub(w0) as f64 / dt;
+            }
+            self.prev_io = Some((now, cur));
+        }
         if self.ticks.is_multiple_of(30) {
             self.disks.refresh(true);
         }
@@ -180,9 +199,10 @@ impl Default for NetworkCollector {
     }
 }
 
-/// Interfaces whose traffic counts towards the Mac's total (skip loopback/tunnels/AWDL).
+/// Interfaces whose traffic counts towards the machine's total: skip loopback, tunnels and AWDL,
+/// plus the Linux virtual interfaces that would count container and VPN traffic twice.
 pub fn counts_towards_total(name: &str) -> bool {
-    const SKIP: [&str; 9] = ["lo", "utun", "awdl", "llw", "gif", "stf", "anpi", "bridge", "ap"];
+    const SKIP: [&str; 17] = ["lo", "utun", "awdl", "llw", "gif", "stf", "anpi", "bridge", "ap", "veth", "docker", "br-", "virbr", "vnet", "tun", "tap", "wg"];
     !SKIP.iter().any(|p| name.starts_with(p))
 }
 
@@ -233,5 +253,9 @@ mod tests {
         assert!(!counts_towards_total("utun3"));
         assert!(is_user_volume("/"));
         assert!(!is_user_volume("/System/Volumes/Data"));
+        assert!(counts_towards_total("eth0") && counts_towards_total("wlp2s0") && counts_towards_total("enp3s0"));
+        assert!(!counts_towards_total("veth12ab") && !counts_towards_total("docker0") && !counts_towards_total("br-1a2b") && !counts_towards_total("wg0"));
+        assert!(is_user_volume("/home") && is_user_volume("/media/me/USB") && is_user_volume("/run/media/me/USB") && is_user_volume("/mnt/data"));
+        assert!(!is_user_volume("/boot/efi") && !is_user_volume("/snap/core22/1234") && !is_user_volume("/var/lib/docker"));
     }
 }

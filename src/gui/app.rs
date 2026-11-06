@@ -300,7 +300,7 @@ impl PulseApp {
     }
 
     /// Navigation requests from the menu bar agent (nav.json).
-    fn handle_nav(&mut self) {
+    fn handle_nav(&mut self, ctx: &egui::Context) {
         if self.last_nav_poll.elapsed() < Duration::from_millis(300) {
             return;
         }
@@ -318,6 +318,10 @@ impl PulseApp {
             self.highlight = nav.app;
             self.sel_proc = None;
             show_app();
+            // AppKit raises the window above; everywhere else it takes a viewport command.
+            if cfg!(not(target_os = "macos")) {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+            }
         }
     }
 
@@ -508,7 +512,7 @@ impl PulseApp {
                 kind: MetricKind::Gpu,
                 title: t("tab.gpu"),
                 caption: if m.gpu.name.is_empty() { "GPU".into() } else { m.gpu.name.clone() },
-                value: format!("{:.0} %", m.gpu.utilization_pct),
+                value: if m.gpu.available { format!("{:.0} %", m.gpu.utilization_pct) } else { dash() },
                 badge: None,
                 stats: vec![
                     stat("tab.memory", if m.gpu.vram_used > 0 { u.bytes(m.gpu.vram_used) } else { dash() }),
@@ -572,7 +576,11 @@ impl PulseApp {
                         stat("tab.cpu", m.power.cpu_w.map(pw).unwrap_or_else(dash)),
                         stat("tab.gpu", m.power.gpu_w.map(pw).unwrap_or_else(dash)),
                         stat("tab.neural", m.power.ane_w.map(|w| i18n.num(format!("{w:.2} W"))).unwrap_or_else(dash)),
-                    ],
+                    ]
+                    .into_iter()
+                    // Linux machines have no Neural Engine to report (see `Tab::supported`).
+                    .take(if Tab::Neural.supported() { 3 } else { 2 })
+                    .collect(),
                     footer: Footer::Bars(sparks.get(MetricKind::Power), None),
                 }
             },
@@ -592,6 +600,7 @@ impl PulseApp {
             },
         ];
         cards.push(self.agents_card(snap, now));
+        cards.retain(|c| c.tab.supported());
 
         let gap = 14.0;
         let card_h = 214.0;
@@ -631,7 +640,13 @@ impl PulseApp {
         let mem_c = col(MetricKind::Memory);
         let by_app = self.app_breakdown(snap, RankMetric::Memory, "memory_by_app", "⊞", mem_c, Tab::Memory, &|v| u.bytes(v as u64), gray);
         let pow_c = col(MetricKind::Battery);
-        let by_power = self.app_breakdown(snap, RankMetric::Energy, "power_by_app", "⚡", pow_c, Tab::Battery, &|w| format_power(&i18n, w), gray);
+        // Linux has no per-process energy counter: this card would only ever show zeros.
+        let by_power = if cfg!(target_os = "linux") {
+            let cores = m.cpu.core_count;
+            self.app_breakdown(snap, RankMetric::Cpu, "cpu_by_app", "▣", pow_c, Tab::Cpu, &|v| u.cpu(v, cores), gray)
+        } else {
+            self.app_breakdown(snap, RankMetric::Energy, "power_by_app", "⚡", pow_c, Tab::Battery, &|w| format_power(&i18n, w), gray)
+        };
         for row in [by_type, by_app, by_power].chunks(cols3) {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = gap;
@@ -1023,6 +1038,9 @@ impl PulseApp {
             let mut mv: Option<(usize, usize)> = None;
             let n = s.menubar.len();
             for (i, it) in s.menubar.iter_mut().enumerate() {
+                if !it.metric.supported() {
+                    continue;
+                }
                 if i > 0 {
                     Self::settings_divider(ui);
                 }
@@ -1257,8 +1275,7 @@ impl PulseApp {
                 }
                 if ui.button(i18n.t("insp.open_terminal")).clicked() {
                     let exe = std::env::current_exe().map(|p| p.display().to_string()).unwrap_or("pulsebar".into());
-                    let script = format!("tell application \"Terminal\" to do script \"'{exe}' process {}\"", d.identity.pid);
-                    let _ = std::process::Command::new("/usr/bin/osascript").args(["-e", &script]).spawn();
+                    sys::open_in_terminal(&[exe, "process".to_string(), d.identity.pid.to_string()]);
                 }
                 if ui.button(self.i18n.t("quit") + "…").clicked() {
                     quit = Some(d.identity.pid);
@@ -1420,7 +1437,7 @@ impl eframe::App for PulseApp {
         // Closing the window ends this process; the menu bar agent keeps running.
         let focused = ctx.input(|i| i.viewport().focused.unwrap_or(true));
         self.shared.foreground.store(focused, Ordering::Relaxed);
-        self.handle_nav();
+        self.handle_nav(ctx);
         // ⌘F focuses the search field of the current tab's app list.
         // Ignored while a dialog is open, like Esc in the search field.
         if ctx.input_mut(|i| i.consume_shortcut(&egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::F))) && !self.dialog_open() {

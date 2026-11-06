@@ -211,7 +211,7 @@ pub fn plan_as(s: &Snapshot, target: Target, mode: Mode, me: u32) -> Result<Plan
                 .find(|a| a.key == *q || a.app.bundle_id.as_deref() == Some(q) || a.app.name.to_ascii_lowercase() == ql)
                 .ok_or_else(|| anyhow::anyhow!("no app matching '{q}'"))?;
             if g.key == crate::grouping::SYSTEM_KEY {
-                bail!("refusing to quit macOS system processes");
+                bail!("refusing to quit {} system processes", crate::grouping::SYSTEM_NAME);
             }
             (g.app.name.clone(), g.pids.clone())
         }

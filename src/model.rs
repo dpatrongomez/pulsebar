@@ -297,6 +297,9 @@ pub struct MachineMetrics {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Process {
+    /// Linux only, never serialised: the systemd unit the process runs in, which can name its app.
+    #[serde(skip)]
+    pub app_hint: Option<String>,
     pub pid: i32,
     pub ppid: i32,
     /// macOS "responsible" process (what Activity Monitor uses for attribution); 0 = unknown.

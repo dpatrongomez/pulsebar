@@ -1,5 +1,6 @@
 //! Native UI, split into two processes (see `daemon` for why):
-//! * `run_agent`  — menu bar status items on a bare NSApplication run loop (no GPU window);
+//! * `run_agent`  — menu bar status items on a bare NSApplication run loop, or D-Bus status icons
+//!   on Linux (no GPU window);
 //! * `run_window` — the egui window, launched on demand and exiting when closed.
 
 mod app;
@@ -9,6 +10,10 @@ pub mod notify;
 mod shortcuts;
 mod loc;
 pub mod tray;
+#[cfg(target_os = "linux")]
+mod tray_linux;
+#[cfg(target_os = "macos")]
+mod tray_mac;
 mod widgets;
 
 use std::sync::Arc;
@@ -54,10 +59,14 @@ fn become_regular_app() {
 }
 
 fn window_running() -> bool {
-    std::fs::read_to_string(paths::window_pid_file())
-        .ok()
-        .and_then(|s| s.trim().parse::<i32>().ok())
-        .is_some_and(|pid| pid > 1 && sys::pid_alive(pid))
+    sys::try_lock(&paths::window_lock_file()).is_none()
+}
+
+/// Ask the window, running or about to start, to show a tab.
+fn write_nav(tab: Tab, app: Option<String>, quit: bool) {
+    let nav = Nav { tab, app, quit, at_ms: sys::now_ms() };
+    let _ = paths::ensure_dirs();
+    let _ = std::fs::write(paths::nav_file(), serde_json::to_vec(&nav).unwrap_or_default());
 }
 
 /// Open (or focus) the window on a tab, optionally scrolled to an app.
@@ -68,9 +77,7 @@ pub fn open_window(tab: Tab, app: Option<String>) {
 /// Like `open_window`; with `quit` the window also shows the quit confirmation for `app`.
 pub fn open_window_with(tab: Tab, app: Option<String>, quit: bool) {
     let quit = quit && app.is_some();
-    let nav = Nav { tab, app: app.clone(), quit, at_ms: sys::now_ms() };
-    let _ = paths::ensure_dirs();
-    let _ = std::fs::write(paths::nav_file(), serde_json::to_vec(&nav).unwrap_or_default());
+    write_nav(tab, app.clone(), quit);
     if window_running() {
         return; // the window polls nav.json and activates itself
     }
@@ -88,10 +95,58 @@ pub fn open_window_with(tab: Tab, app: Option<String>, quit: bool) {
     }
 }
 
+/// An MCP quit request needs a human: make sure the window is up.
+fn surface_pending_request(last_prompted: &std::sync::Mutex<String>) {
+    if let Some(first) = actions::list_pending().first() {
+        let mut lp = last_prompted.lock().unwrap();
+        if *lp != first.id {
+            *lp = first.id.clone();
+            open_window(Tab::Overview, None);
+        }
+    }
+}
+
+/// Close the window too, then end the agent.
+fn quit_agent() -> ! {
+    if let Ok(pid) = std::fs::read_to_string(paths::window_pid_file())
+        && let Ok(pid) = pid.trim().parse::<i32>()
+        && sys::pid_alive(pid)
+    {
+        unsafe { libc::kill(pid, libc::SIGTERM) };
+    }
+    std::process::exit(0);
+}
+
 /// Menu bar agent: tray items + sampler (history, alerts, live.json). No dock icon.
 pub fn run_agent() -> anyhow::Result<()> {
     let _ = paths::ensure_dirs();
+    // Already running: starting it again is a way of asking for the window.
+    let Some(_instance) = sys::try_lock(&paths::agent_lock_file()) else {
+        if std::env::var_os("PULSEBAR_NO_WINDOW").is_none() {
+            open_window(Tab::Overview, None);
+        }
+        return Ok(());
+    };
     let settings = Settings::load();
+    #[cfg(target_os = "linux")]
+    {
+        let shared: Arc<daemon::Shared> = daemon::spawn(settings, Role::Agent);
+        let agent = tray_linux::Agent::new(shared.clone());
+        // Without a status notifier host nothing shows the icons, so the window is the only way in.
+        let no_panel = !agent.has_host();
+        let agent = std::sync::Mutex::new(agent);
+        let last_prompted = std::sync::Mutex::new(String::new());
+        *shared.on_tick.lock().unwrap() = Some(Box::new(move || {
+            agent.lock().unwrap().refresh();
+            surface_pending_request(&last_prompted);
+        }));
+        if std::env::var_os("PULSEBAR_NO_WINDOW").is_none() && (no_panel || !settings_has_launched_before()) {
+            open_window(Tab::Overview, None);
+        }
+        loop {
+            std::thread::park();
+        }
+    }
     #[cfg(target_os = "macos")]
     {
         use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy};
@@ -102,29 +157,17 @@ pub fn run_agent() -> anyhow::Result<()> {
         let shared: Arc<daemon::Shared> = daemon::spawn(settings, Role::Agent);
         let last_prompted = std::sync::Mutex::new(String::new());
         *shared.on_tick.lock().unwrap() = Some(Box::new(move || {
-            tray::schedule_refresh();
-            // An MCP quit request needs a human: make sure the window is up.
-            if let Some(first) = actions::list_pending().first() {
-                let mut lp = last_prompted.lock().unwrap();
-                if *lp != first.id {
-                    *lp = first.id.clone();
-                    open_window(Tab::Overview, None);
-                }
-            }
+            tray_mac::schedule_refresh();
+            surface_pending_request(&last_prompted);
         }));
         notify::install();
-        tray::install(shared.clone());
+        tray_mac::install(shared.clone());
         tray_icon::menu::MenuEvent::set_event_handler(Some(|e: tray_icon::menu::MenuEvent| {
             let id = e.id.0.clone();
             if id == "pb:quit" {
-                if let Ok(pid) = std::fs::read_to_string(paths::window_pid_file())
-                    && let Ok(pid) = pid.trim().parse::<i32>()
-                        && sys::pid_alive(pid) {
-                            unsafe { libc::kill(pid, libc::SIGTERM) };
-                        }
-                std::process::exit(0);
+                quit_agent();
             }
-            if let Some((tab, app)) = tray::target_for(&id) {
+            if let Some((tab, app)) = tray_mac::target_for(&id) {
                 open_window(tab, app);
             }
         }));
@@ -133,6 +176,7 @@ pub fn run_agent() -> anyhow::Result<()> {
         }
         app.run();
     }
+    #[cfg(not(target_os = "linux"))]
     Ok(())
 }
 
@@ -164,12 +208,24 @@ fn app_icon() -> eframe::egui::IconData {
 /// The window process.
 pub fn run_window(tab: Tab, app: Option<String>, quit: bool) -> anyhow::Result<()> {
     let _ = paths::ensure_dirs();
-    let _ = std::fs::write(paths::window_pid_file(), std::process::id().to_string());
+    // Single instance: a launcher can start this directly, any number of times. A second start
+    // hands over to the running window. Screenshot runs are independent of it.
+    let instance = sys::try_lock(&paths::window_lock_file());
+    let screenshot = std::env::var_os("PULSEBAR_SCREENSHOT").is_some();
+    if instance.is_none() && !screenshot {
+        write_nav(tab, app.clone(), quit && app.is_some());
+        return Ok(());
+    }
+    if !screenshot {
+        let _ = std::fs::write(paths::window_pid_file(), std::process::id().to_string());
+    }
     let settings = Settings::load();
     let shared = daemon::spawn(settings, Role::Window);
     let options = eframe::NativeOptions {
         viewport: eframe::egui::ViewportBuilder::default()
             .with_title("PulseBar")
+            // Wayland and X11 match this against pulsebar.desktop for the window's icon.
+            .with_app_id("pulsebar")
             // Screenshots (PULSEBAR_SCREENSHOT) use a taller window so whole tabs fit.
             .with_inner_size(if std::env::var_os("PULSEBAR_SCREENSHOT").is_some() { [1180.0, 1400.0] } else { [1180.0, 760.0] })
             .with_min_inner_size([820.0, 520.0])
@@ -188,7 +244,10 @@ pub fn run_window(tab: Tab, app: Option<String>, quit: bool) -> anyhow::Result<(
             Ok(Box::new(app::PulseApp::new(cc, shared, tab, app, quit)))
         }),
     );
-    let _ = std::fs::remove_file(paths::window_pid_file());
+    if !screenshot {
+        let _ = std::fs::remove_file(paths::window_pid_file());
+    }
+    drop(instance);
     r.map_err(|e| anyhow::anyhow!("{e}"))
 }
 

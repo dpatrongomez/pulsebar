@@ -125,7 +125,7 @@ pub fn to_text_in(i18n: &I18n, d: &ProcessDetail, u: &Units, cores: usize) -> St
     let yn = |b: bool| i18n.t(if b { "insp.yes" } else { "insp.no" });
     let list = |v: Vec<String>, sep: &str| if v.is_empty() { dash() } else { v.join(sep) };
     let opt = |o: &Option<String>| o.clone().unwrap_or_else(dash);
-    let sections: Vec<(&str, Vec<(&str, String)>)> = vec![
+    let mut sections: Vec<(&str, Vec<(&str, String)>)> = vec![
         (
             "insp.identity",
             vec![
@@ -173,12 +173,17 @@ pub fn to_text_in(i18n: &I18n, d: &ProcessDetail, u: &Units, cores: usize) -> St
                     ),
                 ),
                 ("insp.f.disk", i18n.tf("insp.disk_value", &[("r", &u.rate(r.disk_read_bps)), ("w", &u.rate(r.disk_write_bps))])),
-                ("insp.f.energy", u.watts(r.energy_w, 2)),
+                // Linux has no per-process energy counter: a dash, not a misleading 0.
+                ("insp.f.energy", if cfg!(target_os = "linux") { dash() } else { u.watts(r.energy_w, 2) }),
                 ("insp.f.open_files", r.open_files.map(|n| n.to_string()).unwrap_or_else(dash)),
                 ("insp.f.listening", list(r.listening_ports.iter().map(u16::to_string).collect(), ", ")),
             ],
         ),
     ];
+    // Code signing is a macOS concept: an all-empty section would only read as a warning elsewhere.
+    if cfg!(not(target_os = "macos")) && *s == CodeSignInfo::default() {
+        sections.retain(|(title, _)| *title != "insp.security");
+    }
     let width = sections.iter().flat_map(|(_, rows)| rows.iter()).map(|(k, _)| i18n.t(k).chars().count()).max().unwrap_or(0) + 2;
     let mut out = i18n.tf("insp.heading", &[("name", &d.name), ("pid", &i.pid.to_string())]);
     out.push('\n');
@@ -284,7 +289,8 @@ mod tests {
         assert!(t.contains("IDENTIDAD\n") && t.contains("RECURSOS\n"), "{t}");
         assert!(t.contains("3,07 GB (pico 3,20 GB)"), "{t}");
         assert!(t.contains("usuario 1,2 s"), "{t}");
-        assert!(t.contains("1,23 W"), "{t}");
+        // Linux has no per-process energy counter to show.
+        assert!(cfg!(target_os = "linux") || t.contains("1,23 W"), "{t}");
         assert!(!t.contains("Memory") && !t.contains("peak"), "{t}");
         let col = |label: &str, value: &str| t.lines().find(|l| l.starts_with(label)).and_then(|l| l.find(value));
         assert!(col("  PID", "300").is_some());

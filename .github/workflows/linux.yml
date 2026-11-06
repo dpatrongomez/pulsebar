@@ -1,0 +1,19 @@
+# Maintainers develop on macOS, so this is what keeps the Linux build honest.
+name: Linux
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - run: cargo build --no-default-features
+      - run: cargo test
+      - run: cargo clippy --all-targets

@@ -118,6 +118,8 @@ make install-linux     # binary, launcher and icon under ~/.local (PREFIX=… to
 pulsebar window        # the window; `pulsebar app` also runs the status icons
 ```
 
+Each runs once: starting either again brings up the window that's already open.
+
 Building needs Rust and a C compiler (`build-essential`); `cargo build --no-default-features` gives
 a CLI/MCP-only binary with no GUI dependencies. The window needs OpenGL and X11 or Wayland.
 
@@ -126,9 +128,9 @@ What each part reads, and what it degrades to when the source is missing:
 | Area | Source | Without it |
 |---|---|---|
 | CPU, memory, disk, processes, ports | `/proc`, `/sys` | always available |
-| App grouping | `.desktop` files and systemd units | groups by executable name |
+| App grouping | `.desktop` files, systemd units and AppImages | groups by executable name |
 | Per-app network | `ss` (iproute2) | blank; only your own processes' sockets are visible |
-| GPU | `nvidia-smi`, else amdgpu in sysfs | Intel shows the name only, no load |
+| GPU | `nvidia-smi`, else amdgpu in sysfs | other drivers (Intel, Asahi) show the name only, no load |
 | CPU power | RAPL | usually root-only: power comes from the battery instead |
 | Temperatures, fans, battery | hwmon, `power_supply` | "not available" |
 | Sound | `pactl` (PulseAudio or PipeWire) | "not available" |

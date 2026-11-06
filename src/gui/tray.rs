@@ -69,6 +69,7 @@ pub fn title_and_value(m: MenuMetric, s: &Snapshot, u: &Units) -> (String, f64, 
             let used = x.disk.boot_free().map(|v| 100.0 - v.free as f64 * 100.0 / v.total.max(1) as f64).unwrap_or(0.0);
             (short(u.rate(x.disk.read_bps + x.disk.write_bps)), used, used / 100.0)
         }
+        MenuMetric::Gpu if !x.gpu.available => ("—".into(), 0.0, 0.0),
         MenuMetric::Gpu => (format!("{:.0}%", x.gpu.utilization_pct), x.gpu.utilization_pct, x.gpu.utilization_pct / 100.0),
         MenuMetric::Neural => (u.watts(x.neural.power_w, 1).replace(' ', ""), x.neural.utilization_pct, x.neural.utilization_pct / 100.0),
         MenuMetric::Temperature => {
@@ -124,7 +125,7 @@ pub fn lines(m: MenuMetric, s: &Snapshot, u: &Units, i18n: &I18n) -> Vec<String>
             ]
         }
         MenuMetric::Gpu => vec![
-            format!("GPU {}", i18n.num(format!("{:.0} %", x.gpu.utilization_pct))),
+            if x.gpu.available { format!("GPU {}", i18n.num(format!("{:.0} %", x.gpu.utilization_pct))) } else { i18n.t("gpu.no_stats") },
             tf("tray.memory_in_use", &[("v", &u.bytes(x.gpu.vram_used))]),
             x.gpu.power_w.map(|w| tf("tray.power", &[("v", &w1(w))])).unwrap_or_else(|| x.gpu.name.clone()),
         ],

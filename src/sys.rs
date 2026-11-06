@@ -473,9 +473,18 @@ pub fn responsible_pid(pid: i32) -> i32 {
     }
 }
 
-/// The desktop app's unit name a process runs in (Linux; see `linux::process_unit`).
+/// What names a process's desktop app beyond its executable (Linux; see `linux::process_hint`).
 pub fn app_hint(pid: i32) -> Option<String> {
-    if cfg!(target_os = "linux") { crate::linux::process_unit(pid) } else { None }
+    if cfg!(target_os = "linux") { crate::linux::process_hint(pid) } else { None }
+}
+
+/// Take an exclusive lock on `path` if nobody holds it, for as long as the returned file stays
+/// open. The kernel drops it however the process ends, so unlike a pid file it can't go stale.
+pub fn try_lock(path: &std::path::Path) -> Option<std::fs::File> {
+    use std::os::fd::AsRawFd;
+    let file = std::fs::File::options().create(true).truncate(false).write(true).open(path).ok()?;
+    // SAFETY: plain syscall on a descriptor we own.
+    (unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0).then_some(file)
 }
 
 /// Open a terminal running `args`. macOS drives Terminal.app; Linux tries `$TERMINAL`, then the
@@ -532,6 +541,16 @@ pub fn perf_levels() -> Option<(usize, usize)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn instance_lock_excludes_until_released() {
+        let path = std::env::temp_dir().join(format!("pulsebar-lock-test-{}", std::process::id()));
+        let held = try_lock(&path).expect("free");
+        assert!(try_lock(&path).is_none(), "already held");
+        drop(held);
+        assert!(try_lock(&path).is_some(), "released with the file");
+        let _ = std::fs::remove_file(&path);
+    }
 
     #[test]
     fn bundle_paths() {

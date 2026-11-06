@@ -59,10 +59,14 @@ fn become_regular_app() {
 }
 
 fn window_running() -> bool {
-    std::fs::read_to_string(paths::window_pid_file())
-        .ok()
-        .and_then(|s| s.trim().parse::<i32>().ok())
-        .is_some_and(|pid| pid > 1 && sys::pid_alive(pid))
+    sys::try_lock(&paths::window_lock_file()).is_none()
+}
+
+/// Ask the window, running or about to start, to show a tab.
+fn write_nav(tab: Tab, app: Option<String>, quit: bool) {
+    let nav = Nav { tab, app, quit, at_ms: sys::now_ms() };
+    let _ = paths::ensure_dirs();
+    let _ = std::fs::write(paths::nav_file(), serde_json::to_vec(&nav).unwrap_or_default());
 }
 
 /// Open (or focus) the window on a tab, optionally scrolled to an app.
@@ -73,9 +77,7 @@ pub fn open_window(tab: Tab, app: Option<String>) {
 /// Like `open_window`; with `quit` the window also shows the quit confirmation for `app`.
 pub fn open_window_with(tab: Tab, app: Option<String>, quit: bool) {
     let quit = quit && app.is_some();
-    let nav = Nav { tab, app: app.clone(), quit, at_ms: sys::now_ms() };
-    let _ = paths::ensure_dirs();
-    let _ = std::fs::write(paths::nav_file(), serde_json::to_vec(&nav).unwrap_or_default());
+    write_nav(tab, app.clone(), quit);
     if window_running() {
         return; // the window polls nav.json and activates itself
     }
@@ -118,6 +120,13 @@ fn quit_agent() -> ! {
 /// Menu bar agent: tray items + sampler (history, alerts, live.json). No dock icon.
 pub fn run_agent() -> anyhow::Result<()> {
     let _ = paths::ensure_dirs();
+    // Already running: starting it again is a way of asking for the window.
+    let Some(_instance) = sys::try_lock(&paths::agent_lock_file()) else {
+        if std::env::var_os("PULSEBAR_NO_WINDOW").is_none() {
+            open_window(Tab::Overview, None);
+        }
+        return Ok(());
+    };
     let settings = Settings::load();
     #[cfg(target_os = "linux")]
     {
@@ -199,7 +208,17 @@ fn app_icon() -> eframe::egui::IconData {
 /// The window process.
 pub fn run_window(tab: Tab, app: Option<String>, quit: bool) -> anyhow::Result<()> {
     let _ = paths::ensure_dirs();
-    let _ = std::fs::write(paths::window_pid_file(), std::process::id().to_string());
+    // Single instance: a launcher can start this directly, any number of times. A second start
+    // hands over to the running window. Screenshot runs are independent of it.
+    let instance = sys::try_lock(&paths::window_lock_file());
+    let screenshot = std::env::var_os("PULSEBAR_SCREENSHOT").is_some();
+    if instance.is_none() && !screenshot {
+        write_nav(tab, app.clone(), quit && app.is_some());
+        return Ok(());
+    }
+    if !screenshot {
+        let _ = std::fs::write(paths::window_pid_file(), std::process::id().to_string());
+    }
     let settings = Settings::load();
     let shared = daemon::spawn(settings, Role::Window);
     let options = eframe::NativeOptions {
@@ -225,7 +244,10 @@ pub fn run_window(tab: Tab, app: Option<String>, quit: bool) -> anyhow::Result<(
             Ok(Box::new(app::PulseApp::new(cc, shared, tab, app, quit)))
         }),
     );
-    let _ = std::fs::remove_file(paths::window_pid_file());
+    if !screenshot {
+        let _ = std::fs::remove_file(paths::window_pid_file());
+    }
+    drop(instance);
     r.map_err(|e| anyhow::anyhow!("{e}"))
 }
 

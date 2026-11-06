@@ -421,6 +421,14 @@ impl DesktopIndex {
         None
     }
 
+    /// The app named by a [`process_hint`].
+    pub fn match_hint(&self, hint: &str) -> Option<&str> {
+        match hint.strip_prefix(APPIMAGE_HINT) {
+            Some(image) => self.by_program.get(image).map(String::as_str),
+            None => self.match_unit(hint),
+        }
+    }
+
     /// The app named by a cgroup unit (see [`unit_candidates`]).
     pub fn match_unit(&self, unit: &str) -> Option<&str> {
         unit_candidates(unit).iter().find_map(|c| self.by_id.get(c)).map(String::as_str)
@@ -514,6 +522,34 @@ pub fn process_unit(pid: i32) -> Option<String> {
     parse_cgroup_unit(&read(format!("/proc/{pid}/cgroup"))?).filter(|u| !u.starts_with("vte-spawn") && !u.starts_with("session-"))
 }
 
+/// The file name of the AppImage whose mount holds `exe`, from `/proc/self/mountinfo`. An AppImage's
+/// binaries live in a temporary FUSE mount the desktop entry knows nothing about, while the entry
+/// names the image. (`$APPIMAGE` won't do: apps clear it, and their children inherit it.)
+pub fn parse_appimage(exe: &str, mountinfo: &str) -> Option<String> {
+    mountinfo.lines().find_map(|line| {
+        let (mount, rest) = line.split_once(" - ")?;
+        let point = mount.split_whitespace().nth(4)?.replace("\\040", " ");
+        let mut rest = rest.split_whitespace();
+        let (fstype, source) = (rest.next()?, rest.next()?);
+        (point.rsplit('/').next()?.starts_with(".mount_") && fstype.starts_with("fuse.") && exe.strip_prefix(point.as_str())?.starts_with('/')).then(|| source.replace("\\040", " "))
+    })
+}
+
+const APPIMAGE_HINT: &str = "appimage:";
+
+/// What names a process's app beyond its executable: its AppImage or its unit.
+pub fn process_hint(pid: i32) -> Option<String> {
+    let appimage = || {
+        let exe = std::fs::read_link(format!("/proc/{pid}/exe")).ok()?;
+        let exe = exe.to_str()?;
+        if !exe.contains("/.mount_") {
+            return None;
+        }
+        parse_appimage(exe, &read("/proc/self/mountinfo")?).map(|image| format!("{APPIMAGE_HINT}{image}"))
+    };
+    appimage().or_else(|| process_unit(pid))
+}
+
 /// Icon of a desktop entry as a PNG path. SVG-only icons are skipped: the app decodes PNG only.
 pub fn desktop_icon_png(desktop: &str) -> Option<PathBuf> {
     let icon = parse_desktop(&read(desktop)?)?.icon;
@@ -569,21 +605,36 @@ fn gpu_vendor(id: &str) -> &'static str {
     }
 }
 
-/// amdgpu exposes load and VRAM in sysfs; Intel only tells us it's there.
-fn sysfs_gpu() -> Option<GpuMetrics> {
-    let mut cards: Vec<PathBuf> = std::fs::read_dir("/sys/class/drm").ok()?.flatten().map(|e| e.path()).collect();
-    cards.retain(|p| p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with("card") && !n.contains('-')));
-    cards.sort();
-    let dev = cards.first()?.join("device");
-    let num = |f: &str| read(dev.join(f)).and_then(|s| s.trim().parse::<u64>().ok());
-    Some(GpuMetrics {
-        available: true,
-        name: read(dev.join("vendor")).map(|v| gpu_vendor(&v).to_string()).unwrap_or_else(|| "GPU".into()),
-        utilization_pct: num("gpu_busy_percent").unwrap_or(0) as f64,
+/// GPU metrics from one DRM device's attributes, looked up through `attr`. amdgpu exposes load and
+/// VRAM; Intel and Asahi only tell us the GPU is there, which is "no statistics", not 0 % load.
+/// Devices without a PCI vendor file (device tree) are named by their kernel driver.
+pub fn parse_sysfs_gpu(attr: &dyn Fn(&str) -> Option<String>, driver: Option<&str>) -> GpuMetrics {
+    let num = |f: &str| attr(f).and_then(|s| s.trim().parse::<u64>().ok());
+    let busy = num("gpu_busy_percent");
+    let name = match attr("vendor") {
+        Some(v) => gpu_vendor(&v),
+        None if driver.is_some_and(|d| d.starts_with("asahi")) => "Apple GPU",
+        None => "GPU",
+    };
+    GpuMetrics {
+        available: busy.is_some(),
+        name: name.to_string(),
+        utilization_pct: busy.unwrap_or(0) as f64,
         vram_used: num("mem_info_vram_used").unwrap_or(0),
         vram_total: num("mem_info_vram_total").unwrap_or(0),
         power_w: None,
-    })
+    }
+}
+
+fn sysfs_gpu() -> Option<GpuMetrics> {
+    let mut cards: Vec<PathBuf> = std::fs::read_dir("/sys/class/drm").ok()?.flatten().map(|e| e.path().join("device")).collect();
+    cards.retain(|p| p.parent().and_then(|c| c.file_name()).and_then(|n| n.to_str()).is_some_and(|n| n.starts_with("card") && !n.contains('-')));
+    cards.sort();
+    // With several cards, prefer one that reports its load over whichever enumerated first.
+    let dev = cards.iter().find(|d| d.join("gpu_busy_percent").exists()).or(cards.first())?;
+    let driver = std::fs::read_link(dev.join("driver")).ok();
+    let driver = driver.as_deref().and_then(Path::file_name).and_then(|n| n.to_str());
+    Some(parse_sysfs_gpu(&|f| read(dev.join(f)), driver))
 }
 
 pub fn read_gpu() -> Option<GpuMetrics> {
@@ -638,7 +689,8 @@ pub fn parse_battery(attr: &dyn Fn(&str) -> Option<String>, on_ac: bool) -> Batt
     };
     let draw = num("power_now").or_else(|| Some(num("current_now")?.abs() * num("voltage_now")? / 1e6)).map(|uw| uw.abs() / 1e6);
     // In the charge_* case compare with the current in µA, so the unit cancels too.
-    let rate = if num("energy_now").is_some() { num("power_now") } else { num("current_now").map(f64::abs) }.filter(|r| *r > 0.0);
+    // Some drivers (Asahi's macsmc) report the draw as a negative number while discharging.
+    let rate = if num("energy_now").is_some() { num("power_now") } else { num("current_now") }.map(f64::abs).filter(|r| *r > 0.0);
     let percent = num("capacity").or_else(|| Some(now? * 100.0 / full.filter(|f| *f > 0.0)?)).unwrap_or(0.0);
     BatteryMetrics {
         present: attr("present").is_none_or(|p| p.trim() == "1"),
@@ -964,6 +1016,28 @@ mod tests {
     }
 
     #[test]
+    fn appimage_processes_belong_to_their_image() {
+        // From a real machine.
+        let mountinfo = "73 1 0:30 / /tmp rw shared:5 - tmpfs tmpfs rw\n\
+            248 73 0:68 / /tmp/.mount_T3-CodbJGEHN ro,nosuid,nodev,relatime shared:480 - fuse.T3-Code.AppImage T3-Code.AppImage ro,user_id=1000,group_id=1000\n\
+            249 73 0:69 / /tmp/.mount_My\\040Apabc ro shared:481 - fuse.My\\040App.AppImage My\\040App.AppImage ro\n\
+            250 73 0:70 / /home/me/remote rw shared:482 - fuse.sshfs me@host:/ rw\n";
+        assert_eq!(parse_appimage("/tmp/.mount_T3-CodbJGEHN/t3code", mountinfo).as_deref(), Some("T3-Code.AppImage"));
+        assert_eq!(parse_appimage("/tmp/.mount_T3-CodbJGEHN/resources/helper", mountinfo).as_deref(), Some("T3-Code.AppImage"));
+        assert_eq!(parse_appimage("/tmp/.mount_My Apabc/app", mountinfo).as_deref(), Some("My App.AppImage"));
+        assert_eq!(parse_appimage("/tmp/.mount_T3-CodbJGEHNother/t3code", mountinfo), None, "another directory");
+        assert_eq!(parse_appimage("/home/me/remote/tool", mountinfo), None, "other FUSE mounts aren't AppImages");
+        assert_eq!(parse_appimage("/usr/bin/claude", mountinfo), None);
+
+        let path = "/home/me/.local/share/applications/t3code.desktop";
+        let ix = DesktopIndex::from_entries([(path.to_string(), entry("\"/home/me/apps/T3-Code.AppImage\" %U"), None)]);
+        assert_eq!(ix.match_hint("appimage:T3-Code.AppImage"), Some(path));
+        assert_eq!(ix.match_hint("appimage:Other.AppImage"), None);
+        assert_eq!(ix.match_hint("app-t3code@ab12.service"), Some(path), "anything else is a unit");
+        assert_eq!(ix.match_exe("/tmp/.mount_T3-CodbJGEHN/t3code"), None, "the mount alone says nothing");
+    }
+
+    #[test]
     fn unit_names_to_desktop_ids() {
         let has = |unit: &str, id: &str| unit_candidates(unit).iter().any(|c| c == id);
         assert!(has("app-gnome-org.gnome.Nautilus-1234.scope", "org.gnome.Nautilus"));
@@ -1003,6 +1077,33 @@ mod tests {
         assert_eq!(b.health_pct, Some(80.0));
         assert_eq!(b.cycle_count, Some(120));
         assert_eq!(b.time_remaining_min, Some(180), "30 Wh at 10 W");
+    }
+
+    #[test]
+    fn battery_with_negative_power_while_discharging() {
+        // Asahi's macsmc driver, as read from a real M3 Pro.
+        let a = attrs(&[("status", "Discharging"), ("capacity", "100"), ("energy_now", "60000000"), ("power_now", "-10000000")]);
+        let b = parse_battery(&a, false);
+        assert_eq!(b.power_w, Some(10.0));
+        assert_eq!(b.time_remaining_min, Some(360), "60 Wh at 10 W");
+    }
+
+    #[test]
+    fn sysfs_gpu_without_load_is_not_available() {
+        // Asahi: a device-tree device with no statistics.
+        let g = parse_sysfs_gpu(&attrs(&[]), Some("asahi-g15"));
+        assert!(!g.available, "no reading is not 0 % load");
+        assert_eq!(g.name, "Apple GPU");
+        // Intel: a PCI vendor, no statistics.
+        let g = parse_sysfs_gpu(&attrs(&[("vendor", "0x8086")]), Some("i915"));
+        assert!(!g.available);
+        assert_eq!(g.name, "Intel GPU");
+        // amdgpu idling really is 0 %.
+        let g = parse_sysfs_gpu(&attrs(&[("vendor", "0x1002"), ("gpu_busy_percent", "0"), ("mem_info_vram_used", "1024")]), Some("amdgpu"));
+        assert!(g.available);
+        assert_eq!(g.name, "AMD GPU");
+        assert_eq!(g.utilization_pct, 0.0);
+        assert_eq!(g.vram_used, 1024);
     }
 
     #[test]

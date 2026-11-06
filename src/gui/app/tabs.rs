@@ -930,7 +930,7 @@ impl PulseApp {
             kind: MetricKind::Gpu,
             metric: "gpu",
             caption: if g.name.is_empty() { "GPU".into() } else { g.name.clone() },
-            value: format!("{:.0} %", g.utilization_pct),
+            value: if g.available { format!("{:.0} %", g.utilization_pct) } else { "—".into() },
             badge: (!g.available).then(|| (self.t("gpu.no_stats"), self.pal(ui.ctx()).warn)),
             rows: vec![],
             max: Some(100.0),

@@ -46,7 +46,7 @@ impl BundleLookup for BundleCache {
 
     fn bundle_for(&self, p: &Process) -> Option<String> {
         let Some((_, ix)) = &self.desktop else { return sys::outermost_bundle(&p.executable_path) };
-        p.app_hint.as_deref().and_then(|u| ix.match_unit(u)).or_else(|| ix.match_exe(&p.executable_path)).map(str::to_string)
+        p.app_hint.as_deref().and_then(|h| ix.match_hint(h)).or_else(|| ix.match_exe(&p.executable_path)).map(str::to_string)
     }
 
     /// Scans for newly installed apps every so often (a scan reads a few hundred small files).

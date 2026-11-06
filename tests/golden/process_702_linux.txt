@@ -5,7 +5,7 @@ IDENTITY
   Parent        zsh (701)
   Parent chain  zsh (701) ← Terminal (700) ← launchd (1)
   Uptime        3 h 0 min
-  User          dpatrongomez
+  User          <user>
   App           Terminal
   Bundle ID     com.apple.Terminal
   Version       2.14

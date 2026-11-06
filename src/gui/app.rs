@@ -512,7 +512,7 @@ impl PulseApp {
                 kind: MetricKind::Gpu,
                 title: t("tab.gpu"),
                 caption: if m.gpu.name.is_empty() { "GPU".into() } else { m.gpu.name.clone() },
-                value: format!("{:.0} %", m.gpu.utilization_pct),
+                value: if m.gpu.available { format!("{:.0} %", m.gpu.utilization_pct) } else { dash() },
                 badge: None,
                 stats: vec![
                     stat("tab.memory", if m.gpu.vram_used > 0 { u.bytes(m.gpu.vram_used) } else { dash() }),

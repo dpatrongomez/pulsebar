@@ -53,7 +53,10 @@ fn tables() {
     golden("limits.txt", &output::limits(&s));
     // Code signing and per-process energy don't exist on Linux.
     let process_golden = if cfg!(target_os = "linux") { "process_702_linux.txt" } else { "process_702.txt" };
-    golden(process_golden, &output::process(&s, 702, &u, false).unwrap());
+    // The card names the fixture's uid (501) as this machine knows it, which varies by machine.
+    let card = output::process(&s, 702, &u, false).unwrap();
+    let card = card.replacen(&format!("User          {}\n", pulsebar::sys::username(501)), "User          <user>\n", 1);
+    golden(process_golden, &card);
 }
 
 #[test]

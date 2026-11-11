@@ -128,6 +128,11 @@ impl PulseApp {
         widgets::metric_color(self.settings.theme, ui.visuals().dark_mode, k)
     }
 
+    /// Chart lines: the Nothing theme's signal red, the other themes' metric hue.
+    pub(super) fn chart_color(&self, ui: &egui::Ui, k: MetricKind) -> Color32 {
+        widgets::chart_color(self.settings.theme, ui.visuals().dark_mode, k)
+    }
+
     /// Last hour of history for a machine metric, cached for 15 s.
     fn hero_series(&mut self, metric: &str) -> Vec<f64> {
         let key = format!("hero:{metric}");
@@ -151,7 +156,7 @@ impl PulseApp {
     // ---- shared pieces ------------------------------------------------------------------------
 
     pub(super) fn hero(&mut self, ui: &mut egui::Ui, h: Hero) {
-        let color = self.color(ui, h.kind);
+        let color = self.chart_color(ui, h.kind);
         let stats = self.today_stats(h.metric);
         let history = self.hero_series(h.metric);
         let live = self.shared.sparks.read().unwrap().get(h.kind);
@@ -792,16 +797,27 @@ impl PulseApp {
             let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), h + 18.0), egui::Sense::hover());
             let slot = rect.width() / n as f32;
             let bar_w = (slot * 0.6).min(28.0);
-            // Nothing: square columns over a flat remainder.
-            let (radius, track) = if nothing::is_active(ui.ctx()) { (0.0, nothing::tokens(ui.visuals().dark_mode).border) } else { (4.0, color.gamma_multiply(0.14)) };
+            let nothing_on = nothing::is_active(ui.ctx());
+            // Nothing: square columns over a flat remainder. The columns share the charts' signal
+            // red; a core above 90 % runs full red with its figure in red too.
+            let (radius, track) = if nothing_on { (0.0, nothing::tokens(ui.visuals().dark_mode).border) } else { (4.0, color.gamma_multiply(0.14)) };
             for (i, v) in c.per_core.iter().enumerate() {
                 let x = rect.left() + slot * i as f32 + (slot - bar_w) / 2.0;
                 let bg = Rect::from_min_size(egui::pos2(x, rect.top()), Vec2::new(bar_w, h));
                 ui.painter().rect_filled(bg, radius, track);
                 let fh = h * (*v / 100.0).clamp(0.0, 1.0) as f32;
                 let fill = Rect::from_min_max(egui::pos2(x, bg.bottom() - fh), bg.max);
-                ui.painter().rect_filled(fill, radius, if *v > 90.0 { pal.danger } else { color });
-                ui.painter().text(egui::pos2(x + bar_w / 2.0, rect.bottom()), egui::Align2::CENTER_BOTTOM, format!("{:.0}", v), widgets::data_font(ui.ctx(), 10.5), ui.visuals().weak_text_color());
+                let hot = *v > 90.0;
+                let fill_c = if nothing_on {
+                    if hot { nothing::ACCENT } else { nothing::ACCENT.gamma_multiply(0.75) }
+                } else if hot {
+                    pal.danger
+                } else {
+                    color
+                };
+                ui.painter().rect_filled(fill, radius, fill_c);
+                let label_c = if nothing_on && hot { nothing::ACCENT } else { ui.visuals().weak_text_color() };
+                ui.painter().text(egui::pos2(x + bar_w / 2.0, rect.bottom()), egui::Align2::CENTER_BOTTOM, format!("{:.0}", v), widgets::data_font(ui.ctx(), 10.5), label_c);
             }
         });
         self.app_list(ui, snap, RankMetric::Cpu, 25, "tab.cpu");

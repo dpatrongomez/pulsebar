@@ -292,6 +292,15 @@ pub fn metric_color(theme: Theme, dark: bool, kind: MetricKind) -> Color32 {
     }
 }
 
+/// A chart's line and band colour. The Nothing theme paints every chart in its signal red;
+/// the other themes keep each metric's hue.
+pub fn chart_color(theme: Theme, dark: bool, kind: MetricKind) -> Color32 {
+    match theme {
+        Theme::Nothing => nothing::ACCENT,
+        _ => metric_color(theme, dark, kind),
+    }
+}
+
 /// Vertical bar sparkline on a tinted rounded background; newest value on the right.
 /// `max = None` scales to the series' own max.
 pub fn bars(ui: &mut egui::Ui, values: &[f64], size: Vec2, color: Color32, max: Option<f64>) -> egui::Response {
@@ -557,4 +566,16 @@ pub fn icon_button(ui: &mut egui::Ui, icon: ActionIcon, color: Color32, tip: &st
         }
     }
     resp
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn nothing_charts_use_the_signal_red_and_other_themes_keep_the_metric_hue() {
+        assert_eq!(chart_color(Theme::Nothing, true, MetricKind::Cpu), nothing::ACCENT);
+        assert_eq!(chart_color(Theme::Nothing, false, MetricKind::Disk), nothing::ACCENT);
+        assert_eq!(chart_color(Theme::Brand, true, MetricKind::Cpu), metric_color(Theme::Brand, true, MetricKind::Cpu));
+    }
 }

@@ -831,7 +831,9 @@ impl PulseApp {
             let footer = Vec2::new(inner.width(), (inner.bottom() - ui.cursor().top()).clamp(20.0, 40.0));
             match &c.footer {
                 Footer::Bars(v, max) => {
-                    widgets::bars(ui, v, footer, color, *max);
+                    // The Nothing theme paints the card's chart bars in its signal red.
+                    let bar_c = if nothing_on { nothing::ACCENT } else { color };
+                    widgets::bars(ui, v, footer, bar_c, *max);
                 }
                 Footer::Plans(plans) if !plans.is_empty() => {
                     let slot = inner.width() / plans.len() as f32;
@@ -912,7 +914,6 @@ impl PulseApp {
 
     fn history_tab(&mut self, ui: &mut egui::Ui) {
         let u = self.units();
-        let pal = self.pal(ui.ctx());
         let i18n = self.i18n.clone();
         ui.horizontal(|ui| {
             egui::ComboBox::from_id_salt("hmetric").selected_text(i18n.t(&format!("metric.{}", self.history_ui.metric))).show_ui(ui, |ui| {
@@ -953,7 +954,9 @@ impl PulseApp {
             _ => format!("{v:.0}"),
         };
         if let Some((_, _, pts, rank)) = &self.history_ui.cache {
-            widgets::card(ui, |ui| widgets::history_chart(ui, &i18n, pts, 220.0, pal.accent, &fmt));
+            let kind = MetricKind::parse(&self.history_ui.metric).unwrap_or(MetricKind::Cpu);
+            let dark = ui.visuals().dark_mode;
+            widgets::card(ui, |ui| widgets::history_chart(ui, &i18n, pts, 220.0, widgets::chart_color(self.settings.theme, dark, kind), &fmt));
             widgets::card(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.heading(i18n.t("hist.ranking"));

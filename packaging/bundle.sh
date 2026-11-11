@@ -41,6 +41,8 @@ fi
 # 2. Bundle
 sed "s/__VERSION__/$VERSION/g" packaging/Info.plist > "$APP/Contents/Info.plist"
 [ -f packaging/AppIcon.icns ] && cp packaging/AppIcon.icns "$APP/Contents/Resources/"
+# The OFL requires the licences to travel with the fonts embedded in the binary.
+cp assets/fonts/*-OFL.txt "$APP/Contents/Resources/"
 
 if [ -n "${SIGN_ID:-}" ]; then
   codesign --force --options runtime --timestamp --entitlements packaging/entitlements.plist --sign "$SIGN_ID" "$APP"

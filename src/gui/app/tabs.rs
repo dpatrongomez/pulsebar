@@ -90,7 +90,8 @@ fn sort_header(ui: &mut egui::Ui, id: impl egui::AsIdSalt, pos: egui::Pos2, righ
         (false, false) => format!("{label} {arrow}"),
     };
     let active = spec.key == key;
-    let galley = ui.painter().layout_no_wrap(text, egui::FontId::proportional(11.5), Color32::PLACEHOLDER);
+    let (text, font) = widgets::label_parts(ui.ctx(), &text, 11.5);
+    let galley = ui.painter().layout_no_wrap(text, font, Color32::PLACEHOLDER);
     let anchor = if right { egui::Align2::RIGHT_CENTER } else { egui::Align2::LEFT_CENTER };
     let rect = anchor.anchor_size(pos, galley.size());
     // CLICK, not click(): a focusable header would keep focus after a mouse click and silently
@@ -127,6 +128,11 @@ impl PulseApp {
         widgets::metric_color(self.settings.theme, ui.visuals().dark_mode, k)
     }
 
+    /// Chart lines: the Nothing theme's signal red, the other themes' metric hue.
+    pub(super) fn chart_color(&self, ui: &egui::Ui, k: MetricKind) -> Color32 {
+        widgets::chart_color(self.settings.theme, ui.visuals().dark_mode, k)
+    }
+
     /// Last hour of history for a machine metric, cached for 15 s.
     fn hero_series(&mut self, metric: &str) -> Vec<f64> {
         let key = format!("hero:{metric}");
@@ -150,7 +156,7 @@ impl PulseApp {
     // ---- shared pieces ------------------------------------------------------------------------
 
     pub(super) fn hero(&mut self, ui: &mut egui::Ui, h: Hero) {
-        let color = self.color(ui, h.kind);
+        let color = self.chart_color(ui, h.kind);
         let stats = self.today_stats(h.metric);
         let history = self.hero_series(h.metric);
         let live = self.shared.sparks.read().unwrap().get(h.kind);
@@ -162,8 +168,7 @@ impl PulseApp {
         rows.extend(h.rows);
 
         let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 230.0), egui::Sense::hover());
-        let dark = ui.visuals().dark_mode;
-        ui.painter().rect_filled(rect, 16.0, widgets::card_fill(dark));
+        widgets::paint_card(ui, rect, widgets::card_fill(ui.visuals()));
         let inner = rect.shrink2(Vec2::new(22.0, 20.0));
         let left_w = 250.0_f32.min(inner.width() * 0.35);
         let left = Rect::from_min_size(inner.min, Vec2::new(left_w, inner.height()));
@@ -172,14 +177,14 @@ impl PulseApp {
         ui.new_child(egui::UiBuilder::new().max_rect(left).layout(egui::Layout::top_down(Align::Min))).scope(|ui| {
             ui.style_mut().interaction.selectable_labels = false;
             ui.spacing_mut().item_spacing.y = 4.0;
-            ui.label(RichText::new(&h.caption).size(13.0).weak());
+            ui.label(widgets::caption(ui.ctx(), &h.caption, 13.0));
             let (num, unit) = split_unit(&h.value);
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 6.0;
                 ui.with_layout(egui::Layout::left_to_right(Align::Max), |ui| {
-                    ui.label(widgets::num(&self.settings, num, 46.0).strong().color(ui.visuals().strong_text_color()));
+                    ui.label(widgets::hero_num(ui.ctx(), &self.settings, num, 46.0).strong().color(ui.visuals().strong_text_color()));
                     if !unit.is_empty() {
-                        ui.label(RichText::new(unit).size(20.0).weak());
+                        ui.label(widgets::unit(ui.ctx(), unit, 20.0));
                     }
                 });
             });
@@ -192,13 +197,15 @@ impl PulseApp {
             for (i, (k, v)) in rows.iter().enumerate() {
                 let r = Rect::from_min_size(egui::pos2(left.left(), top + i as f32 * row_h), Vec2::new(left_w, row_h));
                 let p = ui.painter();
-                p.text(r.left_center(), egui::Align2::LEFT_CENTER, k, egui::FontId::proportional(13.0), ui.visuals().weak_text_color());
-                p.text(r.right_center(), egui::Align2::RIGHT_CENTER, v, egui::FontId::proportional(13.5), ui.visuals().strong_text_color());
+                let (k, key_font) = widgets::label_parts(ui.ctx(), k, 13.0);
+                p.text(r.left_center(), egui::Align2::LEFT_CENTER, k, key_font, ui.visuals().weak_text_color());
+                p.text(r.right_center(), egui::Align2::RIGHT_CENTER, v, widgets::data_font(ui.ctx(), 13.5), ui.visuals().strong_text_color());
             }
         });
         let resp = ui.interact(chart, ui.scope_id().with(("hero", h.metric)), egui::Sense::hover());
         widgets::area_chart(ui.painter(), chart, &series, color, h.max, ui.visuals().weak_text_color(), &self.t("collecting"));
-        ui.painter().text(chart.right_top() + Vec2::new(0.0, -6.0), egui::Align2::RIGHT_BOTTOM, &range_label, egui::FontId::proportional(11.0), ui.visuals().weak_text_color());
+        let (range_label, range_font) = widgets::label_parts(ui.ctx(), &range_label, 11.0);
+        ui.painter().text(chart.right_top() + Vec2::new(0.0, -6.0), egui::Align2::RIGHT_BOTTOM, range_label, range_font, ui.visuals().weak_text_color());
         if let Some(pos) = resp.hover_pos()
             && series.len() >= 2 {
                 let i = (((pos.x - chart.left()) / chart.width()).clamp(0.0, 1.0) * (series.len() - 1) as f32).round() as usize;
@@ -224,9 +231,13 @@ impl PulseApp {
                     ui.style_mut().interaction.selectable_labels = false;
                     ui.spacing_mut().item_spacing.y = 6.0;
                     ui.horizontal(|ui| {
-                        widgets::icon_badge(ui, t.glyph, color, 24.0);
-                        ui.add_space(2.0);
-                        ui.add(egui::Label::new(RichText::new(&t.label).size(14.0)).truncate());
+                        if nothing::is_active(ui.ctx()) {
+                            ui.add(egui::Label::new(widgets::caption(ui.ctx(), &t.label, 14.0)).truncate());
+                        } else {
+                            widgets::icon_badge(ui, t.glyph, color, 24.0);
+                            ui.add_space(2.0);
+                            ui.add(egui::Label::new(RichText::new(&t.label).size(14.0)).truncate());
+                        }
                     });
                     ui.add_space(2.0);
                     ui.horizontal(|ui| {
@@ -236,7 +247,9 @@ impl PulseApp {
                             }
                         let size = if t.bundle.is_some() || t.app_key.is_some() { 17.0 } else { 24.0 };
                         let c = t.value_color.unwrap_or(ui.visuals().strong_text_color());
-                        ui.add(egui::Label::new(widgets::num(&self.settings, t.value.clone(), size).strong().color(c)).truncate());
+                        // An app's name is not data: the Nothing theme keeps Space Mono for numbers.
+                        let value = if size < 24.0 && nothing::is_active(ui.ctx()) { RichText::new(t.value.clone()).size(size) } else { widgets::num(&self.settings, t.value.clone(), size) };
+                        ui.add(egui::Label::new(value.strong().color(c)).truncate());
                     });
                     match &t.sub {
                         TileSub::Text(s) => {
@@ -301,8 +314,8 @@ impl PulseApp {
         let r = widgets::card(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
-                ui.label(RichText::new(title).size(14.0).weak());
-                ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| ui.label(RichText::new(right).size(14.0).weak()));
+                ui.label(widgets::caption(ui.ctx(), title, 14.0));
+                ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| ui.label(widgets::caption(ui.ctx(), right, 14.0)));
             });
             ui.add_space(4.0);
             add(ui)
@@ -348,7 +361,7 @@ impl PulseApp {
         let mut shown_apps: Vec<String> = vec![];
         let mut shown_procs: HashMap<String, Vec<i32>> = HashMap::new();
         let danger = self.pal(ui.ctx()).danger;
-        let card_fill = widgets::card_fill(ui.visuals().dark_mode);
+        let card_fill = widgets::card_fill(ui.visuals());
         // Search (⌘F): one pass over the snapshot per frame; the query lives per tab.
         let query = self.search_field(ui);
         // The frozen order only applies to the sort and the query it was captured under.
@@ -356,11 +369,11 @@ impl PulseApp {
         // While the pointer is over the list the matches stay frozen with the order (same query).
         let frozen_matches = self.frozen.as_mut().filter(|f| f.metric == m && f.query == query).and_then(|f| f.matches.take());
         let matches = frozen_matches.or_else(|| crate::search::Matcher::new(&query, snap).map(|mt| crate::search::filter(snap, &mt)));
-        let card = egui::Frame::new().fill(card_fill).corner_radius(16.0).inner_margin(egui::Margin::symmetric(10, 14)).show(ui, |ui| {
+        let card = egui::Frame::new().fill(card_fill).stroke(widgets::card_stroke(ui)).corner_radius(16.0).inner_margin(egui::Margin::symmetric(10, 14)).show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
                 ui.add_space(10.0);
-                ui.label(RichText::new(self.t("mem.app")).size(14.0).weak());
+                ui.label(widgets::caption(ui.ctx(), &self.t("mem.app"), 14.0));
                 let summary = match &matches {
                     Some(mt) => format!("· {}", self.tf("search.apps_count", &[("n", &mt.apps.len().to_string())])),
                     None => self.tf("applist.summary", &[("procs", &self.i18n.tn("n.processes", snap.processes.len(), &[])), ("apps", &self.i18n.tn("n.apps", snap.apps.len(), &[]))]),
@@ -427,7 +440,13 @@ impl PulseApp {
             let max = top.iter().map(|a| a.metric(m)).fold(0.0, f64::max).max(1e-9);
             // Apps whose history is being recorded (the detail panel has charts for them).
             let with_history: std::collections::HashSet<&str> = crate::daemon::tracked_apps(snap).into_iter().map(|a| a.key.as_str()).collect();
-            let hover_fill = if ui.visuals().dark_mode { Color32::from_rgb(38, 38, 42) } else { Color32::from_rgb(244, 244, 247) };
+            let hover_fill = if nothing::is_active(ui.ctx()) {
+                ui.visuals().faint_bg_color
+            } else if ui.visuals().dark_mode {
+                Color32::from_rgb(38, 38, 42)
+            } else {
+                Color32::from_rgb(244, 244, 247)
+            };
             for a in top {
                 shown_apps.push(a.key.clone());
                 let highlighted = self.highlight.as_deref() == Some(a.key.as_str());
@@ -457,18 +476,14 @@ impl PulseApp {
                 // Value and meter are painted at fixed positions on the right so every row lines up.
                 let value = output::metric_value(a, m, &u, cores);
                 let strong = ui.visuals().strong_text_color();
-                ui.painter().text(egui::pos2(inner.right(), inner.top() + 10.0), egui::Align2::RIGHT_CENTER, &value, egui::FontId::proportional(15.0), strong);
+                ui.painter().text(egui::pos2(inner.right(), inner.top() + 10.0), egui::Align2::RIGHT_CENTER, &value, widgets::data_font(ui.ctx(), 15.0), strong);
                 for (i, k) in extras.iter().enumerate() {
                     let text = if *k == SortKey::Cpu { u.cpu(a.cpu_pct, cores) } else { u.bytes(a.mem_bytes) };
                     let x = extra_col_right(inner.right(), meter_w, extras.len(), i);
-                    ui.painter().text(egui::pos2(x, inner.top() + 10.0), egui::Align2::RIGHT_CENTER, text, egui::FontId::proportional(14.0), ui.visuals().text_color());
+                    ui.painter().text(egui::pos2(x, inner.top() + 10.0), egui::Align2::RIGHT_CENTER, text, widgets::data_font(ui.ctx(), 14.0), ui.visuals().text_color());
                 }
                 let mrect = Rect::from_min_size(egui::pos2(inner.right() - meter_w, inner.bottom() - 9.0), Vec2::new(meter_w, 5.0));
-                ui.painter().rect_filled(mrect, 2.5, ui.visuals().extreme_bg_color);
-                let frac = (a.metric(m) / max).clamp(0.0, 1.0) as f32;
-                if frac > 0.0 {
-                    ui.painter().rect_filled(Rect::from_min_size(mrect.min, Vec2::new((meter_w * frac).max(3.0), 5.0)), 2.5, color);
-                }
+                widgets::paint_thin_meter(ui, mrect, a.metric(m) / max, color);
                 let left = Rect::from_min_max(inner.min, egui::pos2(inner.right() - meter_w - 16.0 - extras.len() as f32 * EXTRA_COL_W, inner.bottom()));
                 let mut name_rect = Rect::NOTHING;
                 ui.new_child(egui::UiBuilder::new().max_rect(left).layout(egui::Layout::left_to_right(Align::Center))).scope(|ui| {
@@ -553,6 +568,7 @@ impl PulseApp {
                     ui.painter().hline(hin.x_range(), hdr.bottom(), egui::Stroke::new(1.0, ui.visuals().widgets.noninteractive.bg_stroke.color.gamma_multiply(0.6)));
                     let (quit_tip, inspect_tip) = (self.i18n.t("quit") + "…", self.i18n.t("inspect"));
                     let font = egui::FontId::proportional(13.5);
+                    let cell_font = widgets::data_font(ui.ctx(), 13.5);
                     for p in procs.iter().take(200) {
                         let (rect, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 34.0), egui::Sense::CLICK);
                         let selected = highlighted && self.sel_proc == Some(p.pid);
@@ -586,7 +602,7 @@ impl PulseApp {
                         ui.painter().galley(egui::pos2(name_x, cy - galley.size().y / 2.0), galley, text_col);
                         let cells = [p.pid.to_string(), u.cpu(p.cpu_pct, cores), u.bytes(p.mem_bytes), last_proc_cell(&self.i18n, p, last_proc_key, &u)];
                         for (i, (x, text)) in cols.iter().zip(cells).enumerate() {
-                            ui.painter().text(egui::pos2(*x, cy), egui::Align2::RIGHT_CENTER, text, font.clone(), if i == 0 { weak } else { text_col });
+                            ui.painter().text(egui::pos2(*x, cy), egui::Align2::RIGHT_CENTER, text, cell_font.clone(), if i == 0 { weak } else { text_col });
                         }
                         if over || selected {
                             let actions = Rect::from_min_max(egui::pos2(inner.right() - SUB_ACTIONS_W, rect.top()), egui::pos2(inner.right(), rect.bottom()));
@@ -678,7 +694,7 @@ impl PulseApp {
         ui.horizontal(|ui| {
             let clear_w = if query.is_empty() { 0.0 } else { 28.0 };
             // Match the cards: rounded, card-coloured field.
-            let fill = widgets::card_fill(ui.visuals().dark_mode);
+            let fill = widgets::card_fill(ui.visuals());
             ui.visuals_mut().extreme_bg_color = fill;
             let wd = &mut ui.visuals_mut().widgets;
             for w in [&mut wd.inactive, &mut wd.hovered, &mut wd.active] {
@@ -781,14 +797,27 @@ impl PulseApp {
             let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), h + 18.0), egui::Sense::hover());
             let slot = rect.width() / n as f32;
             let bar_w = (slot * 0.6).min(28.0);
+            let nothing_on = nothing::is_active(ui.ctx());
+            // Nothing: square columns over a flat remainder. The columns share the charts' signal
+            // red; a core above 90 % runs full red with its figure in red too.
+            let (radius, track) = if nothing_on { (0.0, nothing::tokens(ui.visuals().dark_mode).border) } else { (4.0, color.gamma_multiply(0.14)) };
             for (i, v) in c.per_core.iter().enumerate() {
                 let x = rect.left() + slot * i as f32 + (slot - bar_w) / 2.0;
                 let bg = Rect::from_min_size(egui::pos2(x, rect.top()), Vec2::new(bar_w, h));
-                ui.painter().rect_filled(bg, 4.0, color.gamma_multiply(0.14));
+                ui.painter().rect_filled(bg, radius, track);
                 let fh = h * (*v / 100.0).clamp(0.0, 1.0) as f32;
                 let fill = Rect::from_min_max(egui::pos2(x, bg.bottom() - fh), bg.max);
-                ui.painter().rect_filled(fill, 4.0, if *v > 90.0 { pal.danger } else { color });
-                ui.painter().text(egui::pos2(x + bar_w / 2.0, rect.bottom()), egui::Align2::CENTER_BOTTOM, format!("{:.0}", v), egui::FontId::proportional(10.5), ui.visuals().weak_text_color());
+                let hot = *v > 90.0;
+                let fill_c = if nothing_on {
+                    if hot { nothing::ACCENT } else { nothing::ACCENT.gamma_multiply(0.75) }
+                } else if hot {
+                    pal.danger
+                } else {
+                    color
+                };
+                ui.painter().rect_filled(fill, radius, fill_c);
+                let label_c = if nothing_on && hot { nothing::ACCENT } else { ui.visuals().weak_text_color() };
+                ui.painter().text(egui::pos2(x + bar_w / 2.0, rect.bottom()), egui::Align2::CENTER_BOTTOM, format!("{:.0}", v), widgets::data_font(ui.ctx(), 10.5), label_c);
             }
         });
         self.app_list(ui, snap, RankMetric::Cpu, 25, "tab.cpu");
@@ -825,11 +854,12 @@ impl PulseApp {
         ];
         self.tiles(ui, MetricKind::Memory, tiles);
         let dark = ui.visuals().dark_mode;
+        let mem_c = widgets::memory_colors(self.settings.theme, dark);
         let parts = [
-            (self.t("mem.app"), m.app as f64, self.color(ui, MetricKind::Cpu)),
-            (self.t("mem.wired"), m.wired as f64, self.color(ui, MetricKind::Sound)),
-            (self.t("mem.compressed"), m.compressed as f64, self.color(ui, MetricKind::Network)),
-            (self.t("mem.cached"), m.cached as f64, if dark { Color32::from_gray(110) } else { Color32::from_gray(170) }),
+            (self.t("mem.app"), m.app as f64, mem_c[0]),
+            (self.t("mem.wired"), m.wired as f64, mem_c[1]),
+            (self.t("mem.compressed"), m.compressed as f64, mem_c[2]),
+            (self.t("mem.cached"), m.cached as f64, widgets::muted_colors(self.settings.theme, dark).0),
         ];
         Self::section(ui, &self.t("memory_by_type"), &self.tf("n_free", &[("v", &u.bytes(m.free))]), |ui| {
             widgets::stacked_bar(ui, &parts, m.total as f64);

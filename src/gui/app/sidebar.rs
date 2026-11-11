@@ -4,7 +4,7 @@
 
 use eframe::egui::{self, Align2, Color32, FontId, Rect, RichText, Sense, Vec2};
 
-use super::{PulseApp, tab_glyph};
+use super::{PulseApp, nothing, tab_glyph};
 use crate::model::{MetricKind, Snapshot};
 use crate::settings::{Tab, TabSetting};
 
@@ -66,10 +66,17 @@ impl PulseApp {
     pub(super) fn sidebar(&mut self, ui: &mut egui::Ui, snap: &Snapshot) {
         let collapsed = ui.ctx().content_rect().width() < COLLAPSE_BELOW;
         let dark = ui.ctx().global_style().visuals.dark_mode;
-        let fill = if dark { Color32::from_rgb(28, 28, 31) } else { Color32::from_rgb(230, 230, 235) };
+        let nothing_on = nothing::is_active(ui.ctx());
+        let fill = if nothing_on {
+            ui.ctx().global_style().visuals.panel_fill
+        } else if dark {
+            Color32::from_rgb(28, 28, 31)
+        } else {
+            Color32::from_rgb(230, 230, 235)
+        };
         let frame = egui::Frame::new().fill(fill).inner_margin(egui::Margin::symmetric(8, 10));
         let width = if collapsed { NARROW } else { WIDE };
-        egui::Panel::left("sidebar").frame(frame).resizable(false).exact_size(width).show_separator_line(false).show(ui, |ui| {
+        egui::Panel::left("sidebar").frame(frame).resizable(false).exact_size(width).show_separator_line(nothing_on).show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 2.0;
             let inner = width - 16.0;
             let sections = sections(&self.settings.tabs);
@@ -90,7 +97,8 @@ impl PulseApp {
                         }
                         Some(h) => {
                             ui.add_space(8.0);
-                            ui.label(RichText::new(self.i18n.t(h).to_uppercase()).size(10.5).strong().color(ui.visuals().weak_text_color()));
+                            let header = if nothing_on { RichText::new(self.i18n.t(h).to_uppercase()).monospace() } else { RichText::new(self.i18n.t(h).to_uppercase()).strong() };
+                            ui.label(header.size(10.5).color(ui.visuals().weak_text_color()));
                         }
                         None => {
                             ui.add_space(6.0);
@@ -132,6 +140,7 @@ impl PulseApp {
         let dark = ui.visuals().dark_mode;
         let accent = super::widgets::metric_color(self.settings.theme, dark, MetricKind::Cpu);
         let selected = self.tab == t;
+        let nothing_on = nothing::is_active(ui.ctx());
         let (rect, resp) = ui.allocate_exact_size(Vec2::new(width, ROW_H), Sense::click());
         // Include the live value so screen readers get the glance too (also when it is not drawn).
         let a11y = mini.map_or_else(|| label.clone(), |m| format!("{label}, {m}"));
@@ -142,30 +151,45 @@ impl PulseApp {
         }
         if ui.is_rect_visible(rect) {
             let p = ui.painter();
-            let bg = if selected {
+            let bg = if selected && nothing_on {
+                ui.visuals().faint_bg_color
+            } else if selected {
                 accent.gamma_multiply(0.18)
             } else if resp.hovered() {
                 ui.visuals().widgets.hovered.weak_bg_fill.gamma_multiply(0.6)
             } else {
                 Color32::TRANSPARENT
             };
-            p.rect_filled(rect, 8.0, bg);
-            if resp.has_focus() {
-                p.rect_stroke(rect, 8.0, ui.visuals().selection.stroke, egui::StrokeKind::Inside);
+            let radius = if nothing_on { 4.0 } else { 8.0 };
+            p.rect_filled(rect, radius, bg);
+            if selected && nothing_on {
+                // The red signal light: the one spot of colour on an otherwise grey screen.
+                p.rect_filled(Rect::from_min_size(rect.min, Vec2::new(2.0, rect.height())), 0.0, nothing::ACCENT);
             }
-            let fg = if selected { accent } else { ui.visuals().text_color() };
+            if resp.has_focus() {
+                p.rect_stroke(rect, radius, ui.visuals().selection.stroke, egui::StrokeKind::Inside);
+            }
+            let fg = if selected {
+                accent
+            } else if nothing_on && !resp.hovered() {
+                ui.visuals().weak_text_color()
+            } else {
+                ui.visuals().text_color()
+            };
             let glyph = FontId::proportional(14.0);
             if collapsed {
                 p.text(rect.center(), Align2::CENTER_CENTER, tab_glyph(t), glyph, fg);
             } else {
                 p.text(egui::pos2(rect.left() + 10.0, rect.center().y), Align2::LEFT_CENTER, tab_glyph(t), glyph, fg);
-                let mini_w = mini.map_or(0.0, |m| p.layout_no_wrap(m.to_string(), FontId::proportional(11.5), fg).size().x + 8.0);
+                let mini_font = super::widgets::data_font(ui.ctx(), 11.5);
+                let mini_w = mini.map_or(0.0, |m| p.layout_no_wrap(m.to_string(), mini_font.clone(), fg).size().x + 8.0);
                 let text_rect = Rect::from_min_max(egui::pos2(rect.left() + 34.0, rect.top()), egui::pos2(rect.right() - 8.0 - mini_w, rect.bottom()));
-                let galley = p.layout_no_wrap(label.clone(), FontId::proportional(13.0), fg);
+                let (text, font) = super::widgets::label_parts(ui.ctx(), &label, 13.0);
+                let galley = p.layout_no_wrap(text, font, fg);
                 // Clip so a long translated label can never push past the mini value or wrap.
                 p.with_clip_rect(text_rect).galley(egui::pos2(text_rect.left(), rect.center().y - galley.size().y / 2.0), galley, fg);
                 if let Some(m) = mini {
-                    p.text(egui::pos2(rect.right() - 8.0, rect.center().y), Align2::RIGHT_CENTER, m, FontId::proportional(11.5), ui.visuals().weak_text_color());
+                    p.text(egui::pos2(rect.right() - 8.0, rect.center().y), Align2::RIGHT_CENTER, m, mini_font, ui.visuals().weak_text_color());
                 }
             }
         }

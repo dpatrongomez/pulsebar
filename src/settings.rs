@@ -182,6 +182,8 @@ pub enum Theme {
     Brand,
     /// Okabe–Ito palette, distinguishable with common colour-vision deficiencies.
     ColorBlind,
+    /// Monochrome, flat and type-led, with its own fonts (see `gui::nothing`).
+    Nothing,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -455,6 +457,13 @@ mod tests {
         // A list_sort that is not even an object is ignored too.
         let s: Settings = serde_json::from_str(r#"{"compact":true,"list_sort":[1]}"#).unwrap();
         assert!(s.compact && s.list_sort.is_empty());
+    }
+
+    #[test]
+    fn nothing_theme_round_trips() {
+        let s: Settings = serde_json::from_str(r#"{"theme":"nothing"}"#).unwrap();
+        assert_eq!(s.theme, Theme::Nothing);
+        assert!(serde_json::to_string(&s).unwrap().contains(r#""theme":"nothing""#));
     }
 
     #[test]

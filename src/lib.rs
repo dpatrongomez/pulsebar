@@ -18,6 +18,7 @@ pub mod history;
 pub mod i18n;
 pub mod inspector;
 pub mod limits;
+pub mod linux;
 pub mod live;
 pub mod login_item;
 pub mod mcp;

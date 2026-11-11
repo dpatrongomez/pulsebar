@@ -51,7 +51,7 @@ pub(super) fn grouped_indices(tabs: &[TabSetting], only_visible: bool) -> Vec<(G
     Group::ALL
         .iter()
         .filter_map(|&g| {
-            let idx: Vec<usize> = tabs.iter().enumerate().filter(|(_, t)| group(t.tab) == Some(g) && (t.visible || !only_visible)).map(|(i, _)| i).collect();
+            let idx: Vec<usize> = tabs.iter().enumerate().filter(|(_, t)| group(t.tab) == Some(g) && t.tab.supported() && (t.visible || !only_visible)).map(|(i, _)| i).collect();
             (!idx.is_empty()).then_some((g, idx))
         })
         .collect()

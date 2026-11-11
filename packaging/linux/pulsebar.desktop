@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=PulseBar
+Comment=App-centric activity monitor for developers
+Exec=pulsebar window
+Icon=pulsebar
+Terminal=false
+Categories=System;Monitor;Utility;
+Keywords=activity;monitor;process;cpu;memory;
+StartupWMClass=pulsebar

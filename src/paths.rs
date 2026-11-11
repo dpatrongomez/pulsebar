@@ -55,9 +55,19 @@ pub fn snoozes_file() -> PathBuf {
     app_support().join("snoozes.json")
 }
 
-/// PID of the running window process (single instance).
+/// PID of the running window process, for the agent to close it.
 pub fn window_pid_file() -> PathBuf {
     app_support().join("window.pid")
+}
+
+/// Held by the running window (single instance).
+pub fn window_lock_file() -> PathBuf {
+    app_support().join(".window.lock")
+}
+
+/// Held by the running menu bar agent (single instance).
+pub fn agent_lock_file() -> PathBuf {
+    app_support().join(".agent.lock")
 }
 
 /// Navigation request from the menu bar ("open the Memory tab at Chrome").

@@ -154,6 +154,20 @@ impl Tab {
     }
 }
 
+impl Tab {
+    /// Linux machines have no Neural Engine to report, so its tab stays out of the way there.
+    pub fn supported(self) -> bool {
+        !(cfg!(target_os = "linux") && self == Tab::Neural)
+    }
+}
+
+impl MenuMetric {
+    /// See [`Tab::supported`].
+    pub fn supported(self) -> bool {
+        !(cfg!(target_os = "linux") && self == MenuMetric::Neural)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TabSetting {
     pub tab: Tab,

@@ -295,8 +295,16 @@ pub fn notify_alert(a: &Alert, i18n: &I18n) {
     notify(&a.title(i18n), &a.text(i18n));
 }
 
+/// Linux: `notify-send` where installed (no network, no extra dependency). Actions are only
+/// offered in the app's alert banner.
+#[cfg(not(target_os = "macos"))]
+pub fn notify(title: &str, body: &str) {
+    let _ = std::process::Command::new("notify-send").args(["--app-name=PulseBar", "--icon=pulsebar", title, body]).spawn();
+}
+
 /// Fallback notification (osascript; no network), attributed to Script Editor. Actions are only
 /// offered in the app's alert banner.
+#[cfg(target_os = "macos")]
 pub fn notify(title: &str, body: &str) {
     let esc = |s: &str| s.replace('\\', "\\\\").replace('"', "\\\"");
     let script = format!("display notification \"{}\" with title \"PulseBar\" subtitle \"{}\"", esc(body), esc(title));

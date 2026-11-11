@@ -511,7 +511,7 @@ pub enum ActionIcon {
 pub fn icon_button(ui: &mut egui::Ui, icon: ActionIcon, color: Color32, tip: &str) -> egui::Response {
     let size = 26.0;
     let (r, resp) = ui.allocate_exact_size(Vec2::splat(size), Sense::click());
-    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), tip));
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), tip));
     let enabled = ui.is_enabled();
     let resp = resp.on_hover_text(tip).on_disabled_hover_text(tip);
     let resp = if enabled { resp.on_hover_cursor(egui::CursorIcon::PointingHand) } else { resp };

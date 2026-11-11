@@ -82,7 +82,7 @@ fn extra_col_right(inner_right: f32, meter_w: f32, n: usize, i: usize) -> f32 {
 
 /// A clickable column header: `pos` is the left edge (left-aligned) or the right edge
 /// (right-aligned) of the text. The active column is emphasised and shows ⏶/⏷ for the direction.
-fn sort_header(ui: &mut egui::Ui, id: impl std::hash::Hash, pos: egui::Pos2, right: bool, label: &str, key: SortKey, spec: SortSpec) -> bool {
+fn sort_header(ui: &mut egui::Ui, id: impl egui::AsIdSalt, pos: egui::Pos2, right: bool, label: &str, key: SortKey, spec: SortSpec) -> bool {
     let arrow = spec.arrow(key);
     let text = match (arrow.is_empty(), right) {
         (true, _) => label.to_string(),
@@ -96,7 +96,7 @@ fn sort_header(ui: &mut egui::Ui, id: impl std::hash::Hash, pos: egui::Pos2, rig
     let rect = anchor.anchor_size(pos, galley.size());
     // CLICK, not click(): a focusable header would keep focus after a mouse click and silently
     // pause the list keys (see `shortcuts::allowed`), like focusable rows would.
-    let resp = ui.interact(rect.expand2(Vec2::new(4.0, 4.0)), ui.id().with(id), egui::Sense::CLICK);
+    let resp = ui.interact(rect.expand2(Vec2::new(4.0, 4.0)), ui.scope_id().with(id), egui::Sense::CLICK);
     let color = if active || resp.hovered() { ui.visuals().strong_text_color() } else { ui.visuals().weak_text_color() };
     ui.painter().galley(rect.min, galley, color);
     resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked()
@@ -202,7 +202,7 @@ impl PulseApp {
                 p.text(r.right_center(), egui::Align2::RIGHT_CENTER, v, widgets::data_font(ui.ctx(), 13.5), ui.visuals().strong_text_color());
             }
         });
-        let resp = ui.interact(chart, ui.id().with(("hero", h.metric)), egui::Sense::hover());
+        let resp = ui.interact(chart, ui.scope_id().with(("hero", h.metric)), egui::Sense::hover());
         widgets::area_chart(ui.painter(), chart, &series, color, h.max, ui.visuals().weak_text_color(), &self.t("collecting"));
         let (range_label, range_font) = widgets::label_parts(ui.ctx(), &range_label, 11.0);
         ui.painter().text(chart.right_top() + Vec2::new(0.0, -6.0), egui::Align2::RIGHT_BOTTOM, range_label, range_font, ui.visuals().weak_text_color());
@@ -470,7 +470,7 @@ impl PulseApp {
                         self.scroll_to_sel = false;
                     }
                 }
-                resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, selected_app, a.app.name.clone()));
+                resp.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, selected_app, a.app.name.clone()));
                 let inner = rect.shrink2(Vec2::new(14.0, 8.0));
                 let meter_w = meter_width(inner.width());
                 // Value and meter are painted at fixed positions on the right so every row lines up.
@@ -572,7 +572,7 @@ impl PulseApp {
                     for p in procs.iter().take(200) {
                         let (rect, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 34.0), egui::Sense::CLICK);
                         let selected = highlighted && self.sel_proc == Some(p.pid);
-                        resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, selected, p.name.clone()));
+                        resp.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, selected, p.name.clone()));
                         if resp.clicked() {
                             self.highlight = Some(a.key.clone());
                             self.sel_proc = Some(p.pid);
@@ -701,7 +701,7 @@ impl PulseApp {
                 w.corner_radius = 10.0.into();
             }
             let edit = egui::TextEdit::singleline(&mut query)
-                .id(egui::Id::new(("app-search", tab)))
+                .id_salt(("app-search", tab))
                 .hint_text(hint)
                 .margin(egui::Margin::symmetric(10, 6))
                 .desired_width(ui.available_width() - clear_w - if clear_w > 0.0 { ui.spacing().item_spacing.x } else { 0.0 });

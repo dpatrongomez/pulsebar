@@ -147,7 +147,7 @@ impl PulseApp {
         });
     }
 
-    pub(super) fn detail_panel(&mut self, ctx: &egui::Context, snap: &Arc<Snapshot>) {
+    pub(super) fn detail_panel(&mut self, ui: &mut egui::Ui, snap: &Arc<Snapshot>) {
         let Some(mut st) = self.detail.take() else { return };
         if let Some(rx) = &st.sign_rx
             && let Ok(d) = rx.try_recv()
@@ -167,11 +167,11 @@ impl PulseApp {
 
         let u = self.settings.units;
         let cores = snap.machine.cpu.core_count;
-        let pal = self.pal(ctx);
+        let pal = self.pal(ui.ctx());
         let group = snap.apps.iter().find(|a| a.key == st.key).cloned();
         let mut close = false;
         let mut action: Option<Mode> = None;
-        egui::SidePanel::right("app_detail").default_width(460.0).show(ctx, |ui| {
+        egui::Panel::right("app_detail").default_size(460.0).show(ui, |ui| {
             ui.add_space(6.0);
             // Header: icon, name, bundle id / version, close.
             ui.horizontal(|ui| {

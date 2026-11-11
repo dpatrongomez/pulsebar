@@ -63,7 +63,7 @@ pub const fn tokens(dark: bool) -> Tokens {
 }
 
 fn flag() -> Id {
-    Id::new("nothing-theme-active")
+    Id::unique("nothing-theme-active")
 }
 
 /// Records the theme where widgets that only have a `Ui` can read it.

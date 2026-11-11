@@ -267,7 +267,7 @@ impl PulseApp {
                     ui.add_space(6.0);
                 }
                 for (m, pts) in &l.charts {
-                    let color = self.color(
+                    let color = self.chart_color(
                         ui,
                         match m {
                             RankMetric::Cpu => MetricKind::Cpu,

@@ -13,7 +13,7 @@ use eframe::egui::{self, Align, Color32, Rect, RichText, Vec2};
 use super::dialog::{self, Dialog, DialogIcon};
 use super::icons::Icons;
 use super::shortcuts::{self, ListEffect, Row, Shortcut};
-use super::loc;
+use super::{loc, nothing};
 use super::widgets::{self, ActionIcon, Palette};
 use super::{Nav, show_app};
 use crate::actions::{self, HumanYes, Mode, PendingRequest, Plan, Target};
@@ -155,6 +155,8 @@ pub struct PulseApp {
     last_key_nav: Option<Instant>,
     started: Option<Instant>,
     screenshot_requested: bool,
+    /// Which font set is installed (see `nothing::fonts`); `None` until the first `apply_style`.
+    nothing_fonts: Option<bool>,
     series_cache: HashMap<String, (Instant, Vec<f64>)>,
     login: login::LoginUi,
     /// Search query per tab (kept while the window is open).
@@ -174,7 +176,7 @@ fn local_midnight() -> i64 {
 impl PulseApp {
     pub fn new(cc: &eframe::CreationContext<'_>, shared: Arc<Shared>, tab: Tab, app_key: Option<String>, quit: bool) -> Self {
         let settings = shared.settings.read().unwrap().clone();
-        let app = Self {
+        let mut app = Self {
             i18n: I18n::new(settings.language.as_deref()),
             tab,
             scroll_to_highlight: app_key.is_some(),
@@ -206,17 +208,32 @@ impl PulseApp {
             focus_search: false,
             shared,
             settings,
+            nothing_fonts: None,
         };
         app.apply_style(&cc.egui_ctx);
         app
     }
 
-    fn apply_style(&self, ctx: &egui::Context) {
+    fn apply_style(&mut self, ctx: &egui::Context) {
+        let nothing_on = self.settings.theme == Theme::Nothing;
+        nothing::set_active(ctx, nothing_on);
+        // Only on a real switch: comparing or rebuilding font atlases is not free, and settings
+        // are saved often.
+        if self.nothing_fonts != Some(nothing_on) {
+            self.nothing_fonts = Some(nothing_on);
+            ctx.set_fonts(nothing::fonts(nothing_on));
+        }
         for theme in [egui::Theme::Dark, egui::Theme::Light] {
+            let dark = theme == egui::Theme::Dark;
             ctx.style_mut_of(theme, |s| {
-                let fill = widgets::window_fill(theme == egui::Theme::Dark);
-                s.visuals.panel_fill = fill;
-                s.visuals.window_fill = widgets::card_fill(theme == egui::Theme::Dark);
+                // From the defaults each time, so leaving the Nothing theme leaves nothing behind.
+                s.visuals = if dark { egui::Visuals::dark() } else { egui::Visuals::light() };
+                s.text_styles = egui::Style::default().text_styles;
+                s.visuals.panel_fill = widgets::window_fill(dark);
+                s.visuals.window_fill = widgets::base_card_fill(dark);
+                if nothing_on {
+                    nothing::apply(s, dark);
+                }
             });
         }
         ctx.style_mut(|s| {
@@ -474,7 +491,7 @@ impl PulseApp {
         } else {
             (t("pressure.normal"), col(MetricKind::Battery))
         };
-        let (mem_app_c, mem_wired_c, mem_comp_c) = (col(MetricKind::Cpu), col(MetricKind::Sound), col(MetricKind::Network));
+        let [mem_app_c, mem_wired_c, mem_comp_c] = widgets::memory_colors(theme, dark);
 
         let boot = m.disk.boot_free();
         let battery = &m.battery;
@@ -620,8 +637,7 @@ impl PulseApp {
 
         // Breakdown cards: memory by type, memory by app, power by app.
         let (cols3, w3) = Self::grid(ui.available_width(), gap, 240.0, 3);
-        let gray = if dark { Color32::from_gray(110) } else { Color32::from_gray(170) };
-        let free_c = if dark { Color32::from_gray(60) } else { Color32::from_gray(215) };
+        let (gray, free_c) = widgets::muted_colors(theme, dark);
         let by_type = Breakdown3 {
             tab: Tab::Memory,
             glyph: "☰",
@@ -732,19 +748,29 @@ impl PulseApp {
     fn card_frame(ui: &mut egui::Ui, size: Vec2) -> (egui::Response, Rect) {
         let (rect, resp) = ui.allocate_exact_size(size, egui::Sense::click());
         let dark = ui.visuals().dark_mode;
-        let mut fill = widgets::card_fill(dark);
+        let mut fill = widgets::card_fill(ui.visuals());
         if resp.hovered() {
-            fill = if dark { Color32::from_rgb(36, 36, 40) } else { Color32::from_rgb(250, 250, 252) };
+            fill = if nothing::is_active(ui.ctx()) {
+                ui.visuals().faint_bg_color
+            } else if dark {
+                Color32::from_rgb(36, 36, 40)
+            } else {
+                Color32::from_rgb(250, 250, 252)
+            };
         }
-        ui.painter().rect_filled(rect, 16.0, fill);
+        widgets::paint_card(ui, rect, fill);
         (resp.on_hover_cursor(egui::CursorIcon::PointingHand), rect.shrink(16.0))
     }
 
     fn card_title(&self, ui: &mut egui::Ui, glyph: &str, title: &str, color: Color32, chevron: bool) {
         ui.horizontal(|ui| {
-            widgets::icon_badge(ui, glyph, color, 26.0);
-            ui.add_space(4.0);
-            ui.label(RichText::new(title).size(15.0).color(color).strong());
+            if nothing::is_active(ui.ctx()) {
+                ui.label(widgets::caption(ui.ctx(), title, 15.0).color(color));
+            } else {
+                widgets::icon_badge(ui, glyph, color, 26.0);
+                ui.add_space(4.0);
+                ui.label(RichText::new(title).size(15.0).color(color).strong());
+            }
             if chevron {
                 ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| ui.label(RichText::new("›").size(16.0).weak()));
             }
@@ -764,14 +790,17 @@ impl PulseApp {
             ui.spacing_mut().item_spacing.y = 4.0;
             self.card_title(ui, glyph, &c.title, color, true);
             ui.add_space(8.0);
-            ui.label(RichText::new(&c.caption).size(12.5).weak());
+            let nothing_on = nothing::is_active(ui.ctx());
+            let caption = egui::Label::new(widgets::caption(ui.ctx(), &c.caption, 12.5));
+            // All-caps data type runs wide; a wrapped line would push the card's contents down.
+            ui.add(if nothing_on { caption.truncate() } else { caption });
             let (num, unit) = split_unit(&c.value);
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 5.0;
                 ui.with_layout(egui::Layout::left_to_right(Align::Max), |ui| {
                     ui.label(widgets::num(&self.settings, num, 32.0).strong().color(ui.visuals().strong_text_color()));
                     if !unit.is_empty() {
-                        ui.label(RichText::new(unit).size(17.0).weak());
+                        ui.label(widgets::unit(ui.ctx(), unit, 17.0));
                     }
                     if let Some((text, col)) = &c.badge {
                         ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| widgets::pill(ui, text, *col));
@@ -780,7 +809,8 @@ impl PulseApp {
             });
             ui.add_space(6.0);
             let col_w = inner.width() / 3.0;
-            ui.horizontal(|ui| {
+            // Top-aligned: a column taller than its slot (fonts differ) must not shift the next one.
+            ui.horizontal_top(|ui| {
                 ui.spacing_mut().item_spacing.x = 0.0;
                 for s in &c.stats {
                     ui.allocate_ui_with_layout(Vec2::new(col_w, 36.0), egui::Layout::top_down(Align::Min), |ui| {
@@ -791,9 +821,9 @@ impl PulseApp {
                             if let Some(d) = s.dot {
                                 widgets::dot(ui, d);
                             }
-                            ui.add(egui::Label::new(RichText::new(&s.label).size(12.0).weak()).truncate());
+                            ui.add(egui::Label::new(widgets::small_caption(ui.ctx(), &s.label, 12.0)).truncate());
                         });
-                        ui.add(egui::Label::new(widgets::num(&self.settings, s.value.clone(), 13.5).strong().color(ui.visuals().strong_text_color())).truncate());
+                        ui.add(egui::Label::new(widgets::num(&self.settings, s.value.clone(), if nothing_on { 11.0 } else { 13.5 }).strong().color(ui.visuals().strong_text_color())).truncate());
                     });
                 }
             });
@@ -801,7 +831,9 @@ impl PulseApp {
             let footer = Vec2::new(inner.width(), (inner.bottom() - ui.cursor().top()).clamp(20.0, 40.0));
             match &c.footer {
                 Footer::Bars(v, max) => {
-                    widgets::bars(ui, v, footer, color, *max);
+                    // The Nothing theme paints the card's chart bars in its signal red.
+                    let bar_c = if nothing_on { nothing::ACCENT } else { color };
+                    widgets::bars(ui, v, footer, bar_c, *max);
                 }
                 Footer::Plans(plans) if !plans.is_empty() => {
                     let slot = inner.width() / plans.len() as f32;
@@ -815,7 +847,7 @@ impl PulseApp {
                             };
                             ui.allocate_ui_with_layout(Vec2::new(slot, footer.y), egui::Layout::top_down(Align::Min), |ui| {
                                 ui.spacing_mut().item_spacing.y = 3.0;
-                                ui.add(egui::Label::new(RichText::new(label).size(11.0).weak()).truncate());
+                                ui.add(egui::Label::new(widgets::caption(ui.ctx(), label, 11.0)).truncate());
                                 widgets::meter(ui, *frac, slot - 12.0, c);
                             });
                         }
@@ -835,7 +867,10 @@ impl PulseApp {
             self.card_title(ui, b.glyph, &b.title, b.color, false);
             ui.add_space(10.0);
             ui.horizontal(|ui| {
-                let d = (inner.bottom() - ui.cursor().top()).clamp(90.0, 128.0);
+                // Space Mono values need more of the row: the gauge gives way, and is thin anyway.
+                let nothing_on = nothing::is_active(ui.ctx());
+                let d = (inner.bottom() - ui.cursor().top()).clamp(90.0, if nothing_on { 104.0 } else { 128.0 });
+                let value_size = if nothing_on { 12.0 } else { 13.5 };
                 let parts: Vec<(f64, Color32)> = b.rows.iter().map(|r| (r.weight, r.color)).collect();
                 widgets::donut(ui, d, &parts, &b.big, &b.small);
                 ui.add_space(14.0);
@@ -849,14 +884,14 @@ impl PulseApp {
                                 ui.image((t, Vec2::splat(16.0)));
                             }
                             // Leave room for the value so long names truncate instead of colliding.
-                            let value_w = ui.painter().layout_no_wrap(r.value.clone(), egui::FontId::proportional(13.5), Color32::WHITE).size().x;
+                            let value_w = ui.painter().layout_no_wrap(r.value.clone(), widgets::num_font(&self.settings, value_size), Color32::WHITE).size().x;
                             let name_w = (ui.available_width() - value_w - 10.0).max(40.0);
                             ui.allocate_ui_with_layout(Vec2::new(name_w, 18.0), egui::Layout::left_to_right(Align::Center), |ui| {
                                 ui.set_width(name_w);
                                 ui.add(egui::Label::new(RichText::new(&r.name).size(13.5)).truncate());
                             });
                             ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
-                                ui.label(widgets::num(&self.settings, r.value.clone(), 13.5).weak());
+                                ui.label(widgets::num(&self.settings, r.value.clone(), value_size).weak());
                             });
                         });
                     }
@@ -879,7 +914,6 @@ impl PulseApp {
 
     fn history_tab(&mut self, ui: &mut egui::Ui) {
         let u = self.units();
-        let pal = self.pal(ui.ctx());
         let i18n = self.i18n.clone();
         ui.horizontal(|ui| {
             egui::ComboBox::from_id_salt("hmetric").selected_text(i18n.t(&format!("metric.{}", self.history_ui.metric))).show_ui(ui, |ui| {
@@ -920,7 +954,9 @@ impl PulseApp {
             _ => format!("{v:.0}"),
         };
         if let Some((_, _, pts, rank)) = &self.history_ui.cache {
-            widgets::card(ui, |ui| widgets::history_chart(ui, &i18n, pts, 220.0, pal.accent, &fmt));
+            let kind = MetricKind::parse(&self.history_ui.metric).unwrap_or(MetricKind::Cpu);
+            let dark = ui.visuals().dark_mode;
+            widgets::card(ui, |ui| widgets::history_chart(ui, &i18n, pts, 220.0, widgets::chart_color(self.settings.theme, dark, kind), &fmt));
             widgets::card(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.heading(i18n.t("hist.ranking"));
@@ -1004,10 +1040,14 @@ impl PulseApp {
                 changed |= ui.radio_value(&mut s.theme, Theme::Monochrome, i18n.t("set.monochrome")).changed();
                 changed |= ui.radio_value(&mut s.theme, Theme::Brand, i18n.t("set.brand")).changed();
                 changed |= ui.radio_value(&mut s.theme, Theme::ColorBlind, i18n.t("set.colorblind")).changed();
+                changed |= ui.radio_value(&mut s.theme, Theme::Nothing, i18n.t("set.nothing")).changed();
             });
             ui.horizontal_wrapped(|ui| {
-                changed |= ui.radio_value(&mut s.number_font, NumberFont::Proportional, i18n.t("set.proportional")).changed();
-                changed |= ui.radio_value(&mut s.number_font, NumberFont::Monospace, i18n.t("set.monospaced")).changed();
+                // The Nothing theme always sets numbers in Space Mono, so this choice would do nothing.
+                if s.theme != Theme::Nothing {
+                    changed |= ui.radio_value(&mut s.number_font, NumberFont::Proportional, i18n.t("set.proportional")).changed();
+                    changed |= ui.radio_value(&mut s.number_font, NumberFont::Monospace, i18n.t("set.monospaced")).changed();
+                }
                 changed |= ui.checkbox(&mut s.compact, i18n.t("set.compact")).changed();
             });
             ui.add_space(4.0);
@@ -1474,8 +1514,10 @@ impl eframe::App for PulseApp {
         self.sidebar(ctx, &snap);
         if !self.toasts.is_empty() {
             egui::TopBottomPanel::bottom("toasts").show(ctx, |ui| {
+                let nothing_on = nothing::is_active(ui.ctx());
                 for (_, t) in &self.toasts {
-                    ui.label(RichText::new(t).strong());
+                    // The Nothing language has no toasts, only inline status text.
+                    ui.label(if nothing_on { RichText::new(format!("[{t}]")).monospace().size(12.0) } else { RichText::new(t).strong() });
                 }
             });
         }

@@ -11,6 +11,8 @@
 //! Only the menu bar agent posts notifications and receives the responses; the window is a
 //! separate process of the same bundle and is driven through `gui::open_window_with`.
 
+#![cfg_attr(not(target_os = "macos"), allow(dead_code))]
+
 use crate::alerts::Alert;
 use crate::model::AlertKind;
 use crate::settings::Tab;

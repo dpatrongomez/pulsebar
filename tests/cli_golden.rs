@@ -51,7 +51,12 @@ fn tables() {
     golden("projects.txt", &output::projects(&s, &u));
     golden("agents.txt", &output::agents(&s, &u));
     golden("limits.txt", &output::limits(&s));
-    golden("process_702.txt", &output::process(&s, 702, &u, false).unwrap());
+    // Code signing and per-process energy don't exist on Linux.
+    let process_golden = if cfg!(target_os = "linux") { "process_702_linux.txt" } else { "process_702.txt" };
+    // The card names the fixture's uid (501) as this machine knows it, which varies by machine.
+    let card = output::process(&s, 702, &u, false).unwrap();
+    let card = card.replacen(&format!("User          {}\n", pulsebar::sys::username(501)), "User          <user>\n", 1);
+    golden(process_golden, &card);
 }
 
 #[test]

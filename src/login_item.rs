@@ -2,6 +2,9 @@
 //! General → Login Items as PulseBar. The status is always read back from the system (the user
 //! can switch it off there), never from a stored flag. Only a bundled `PulseBar.app` can register;
 //! a bare binary (`cargo run`) reports [`LoginStatus::Unbundled`] instead.
+//!
+//! On Linux it is an XDG autostart entry, which any binary can create: the status is whether that
+//! file is there and enabled, so removing it by hand or from the desktop's settings also counts.
 
 use std::path::Path;
 
@@ -156,22 +159,61 @@ mod sys_impl {
     }
 }
 
+/// The XDG autostart entry that starts the status icons at login.
+pub fn autostart_entry(exe: &Path) -> String {
+    // Exec= quoting: double quotes around the path, with `\`, `"`, `$` and `` ` `` escaped.
+    let mut quoted = String::new();
+    for c in exe.to_string_lossy().chars() {
+        if matches!(c, '"' | '`' | '$' | '\\') {
+            quoted.push('\\');
+        }
+        quoted.push(c);
+    }
+    format!("[Desktop Entry]\nType=Application\nName=PulseBar\nComment=Activity monitor\nIcon=pulsebar\nExec=\"{quoted}\" app\nTerminal=false\nX-GNOME-Autostart-enabled=true\n")
+}
+
+/// Whether an autostart entry is switched on. Desktops turn one off with `Hidden=true` or, on
+/// GNOME, `X-GNOME-Autostart-enabled=false`.
+pub fn autostart_enabled(entry: &str) -> bool {
+    !entry.lines().map(str::trim).any(|l| matches!(l, "Hidden=true" | "X-GNOME-Autostart-enabled=false"))
+}
+
 #[cfg(not(target_os = "macos"))]
 mod sys_impl {
     use super::{LoginStatus, SetError};
+    use std::path::PathBuf;
+
+    fn entry_path() -> Option<PathBuf> {
+        Some(dirs::config_dir()?.join("autostart/pulsebar.desktop"))
+    }
+
     pub fn status() -> LoginStatus {
-        LoginStatus::Unsupported
+        let on = entry_path().and_then(|p| std::fs::read_to_string(p).ok()).is_some_and(|e| super::autostart_enabled(&e));
+        if on { LoginStatus::Enabled } else { LoginStatus::Disabled }
     }
-    pub fn set(_on: bool) -> Result<(), SetError> {
-        Err(SetError::plain("launch at login is only available on macOS"))
+
+    pub fn set(on: bool) -> Result<(), SetError> {
+        let err = |e: std::io::Error| SetError::plain(format!("couldn't change the autostart entry: {e}"));
+        let path = entry_path().ok_or_else(|| SetError::plain("no config directory"))?;
+        if on {
+            let exe = std::env::current_exe().map_err(err)?;
+            std::fs::create_dir_all(path.parent().unwrap_or(&path)).map_err(err)?;
+            std::fs::write(&path, super::autostart_entry(&exe)).map_err(err)
+        } else {
+            match std::fs::remove_file(&path) {
+                Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(err(e)),
+                _ => Ok(()),
+            }
+        }
     }
+
     pub fn open_settings() {}
 }
 
 /// Current status, read from the system.
 pub fn status() -> LoginStatus {
-    if !bundled() {
-        return if cfg!(target_os = "macos") { LoginStatus::Unbundled } else { LoginStatus::Unsupported };
+    if cfg!(target_os = "macos") && !bundled() {
+        return LoginStatus::Unbundled;
     }
     sys_impl::status()
 }
@@ -291,6 +333,21 @@ mod tests {
         assert!(!should_offer(&LoginStatus::Enabled, false));
     }
 
+    #[test]
+    fn autostart_entry_runs_the_app_and_quotes_the_path() {
+        let e = autostart_entry(Path::new("/home/me/my \"apps\"/pulsebar"));
+        assert!(e.contains("Exec=\"/home/me/my \\\"apps\\\"/pulsebar\" app\n"), "{e}");
+        assert!(autostart_enabled(&e));
+    }
+
+    #[test]
+    fn desktops_can_turn_autostart_off() {
+        assert!(!autostart_enabled("[Desktop Entry]\nHidden=true\n"));
+        assert!(!autostart_enabled("[Desktop Entry]\nX-GNOME-Autostart-enabled=false\n"));
+        assert!(autostart_enabled("[Desktop Entry]\nHidden=false\n"));
+    }
+
+    #[cfg(target_os = "macos")]
     #[test]
     fn unbundled_test_binary_degrades() {
         // `cargo test` runs outside a bundle: no panic, an explanatory error.

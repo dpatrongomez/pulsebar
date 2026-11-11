@@ -1,5 +1,6 @@
 //! GPU, Neural Engine / power (IOReport), temperatures + fans (SMC), battery, audio, Bluetooth.
-//! All of these use slower data sources and run in background workers.
+//! All of these use slower data sources and run in background workers. Linux has its own source
+//! for each (see `crate::linux`) and no Neural Engine.
 
 use std::time::Duration;
 
@@ -65,6 +66,12 @@ pub struct GpuCollector {
 }
 
 impl GpuCollector {
+    #[cfg(not(target_os = "macos"))]
+    pub fn new() -> Self {
+        Self { worker: Background::spawn("gpu", Duration::from_secs(2), || (), |_| crate::linux::read_gpu()) }
+    }
+
+    #[cfg(target_os = "macos")]
     pub fn new() -> Self {
         let worker = Background::spawn(
             "gpu",
@@ -136,7 +143,21 @@ impl EnergyCollector {
             });
             Self { worker: Some(worker) }
         }
-        #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+        #[cfg(target_os = "linux")]
+        {
+            // RAPL counts microjoules for the CPU package; most distros restrict it to root, and
+            // then this simply never reports. Neural and GPU power stay at 0: nothing measures them.
+            let worker = Background::spawn("energy", Duration::from_secs(3), || None, |prev: &mut Option<(std::time::Instant, u64)>| {
+                let now = std::time::Instant::now();
+                let uj = crate::linux::rapl_energy_uj()?;
+                let last = prev.replace((now, uj));
+                let (t0, uj0) = last?;
+                let cpu = uj.saturating_sub(uj0) as f64 / 1e6 / now.duration_since(t0).as_secs_f64().max(0.1);
+                Some(EnergySample { cpu, ..Default::default() })
+            });
+            Self { worker: Some(worker) }
+        }
+        #[cfg(not(any(target_os = "linux", all(target_os = "macos", target_arch = "aarch64"))))]
         {
             Self { worker: None }
         }
@@ -158,6 +179,13 @@ impl MetricCollector for EnergyCollector {
             out.neural.available = false;
             return;
         };
+        if cfg!(target_os = "linux") {
+            out.power.cpu_w = Some(e.cpu);
+            if out.power.system_w.is_none() {
+                out.power.system_w = Some(e.cpu);
+            }
+            return;
+        }
         out.neural = NeuralMetrics {
             available: true,
             power_w: e.ane,
@@ -185,9 +213,13 @@ pub fn classify_temps(all: &[(String, f64)]) -> (Option<f64>, Option<f64>) {
     };
     let cpu = avg(&|l: &str| {
         let l = l.to_ascii_lowercase();
-        l.contains("cpu") || l.contains("tdie") || l.contains("pacc") || l.contains("eacc")
+        // The last four are Linux's Intel and AMD sensors.
+        l.contains("cpu") || l.contains("tdie") || l.contains("pacc") || l.contains("eacc") || l.contains("coretemp") || l.contains("k10temp") || l.contains("zenpower") || l.contains("tctl")
     });
-    let gpu = avg(&|l: &str| l.to_ascii_lowercase().contains("gpu"));
+    let gpu = avg(&|l: &str| {
+        let l = l.to_ascii_lowercase();
+        l.contains("gpu") || l.contains("nouveau") || l.contains("radeon")
+    });
     (cpu, gpu)
 }
 
@@ -221,7 +253,7 @@ impl SensorsCollector {
                     .collect();
                 let (cpu, gpu) = classify_temps(&all);
                 #[allow(unused_mut)]
-                let mut fans = Vec::new();
+                let mut fans = if cfg!(target_os = "linux") { crate::linux::read_fans() } else { Vec::new() };
                 #[cfg(target_os = "macos")]
                 if let Some(smc) = &st.smc {
                     let n = smc.read("FNum").unwrap_or(0.0) as usize;
@@ -311,6 +343,9 @@ pub struct BatteryCollector {
 impl BatteryCollector {
     pub fn new() -> Self {
         let worker = Background::spawn("battery", Duration::from_secs(10), || (), |_| {
+            if cfg!(target_os = "linux") {
+                return crate::linux::read_battery().map(|b| (b, None));
+            }
             let v = plist_from_cmd("/usr/sbin/ioreg", &["-r", "-n", "AppleSmartBattery", "-a"], Duration::from_secs(3))?;
             Some(parse_smart_battery(&v))
         });
@@ -395,7 +430,7 @@ pub fn read_audio() -> AudioMetrics {
 
 #[cfg(not(target_os = "macos"))]
 pub fn read_audio() -> AudioMetrics {
-    AudioMetrics::default()
+    crate::linux::read_audio()
 }
 
 /// Set output (or input) volume, 0..1. Returns false when the device has no volume control.
@@ -406,8 +441,7 @@ pub fn set_volume(input: bool, v: f64) -> bool {
     }
     #[cfg(not(target_os = "macos"))]
     {
-        let _ = (input, v);
-        false
+        crate::linux::set_volume(input, v)
     }
 }
 
@@ -418,8 +452,7 @@ pub fn set_muted(muted: bool) -> bool {
     }
     #[cfg(not(target_os = "macos"))]
     {
-        let _ = muted;
-        false
+        crate::linux::set_muted(muted)
     }
 }
 
@@ -475,6 +508,9 @@ pub struct BluetoothCollector {
 impl BluetoothCollector {
     pub fn new() -> Self {
         let worker = Background::spawn("bluetooth", Duration::from_secs(60), || (), |_| {
+            if cfg!(target_os = "linux") {
+                return crate::linux::read_bluetooth();
+            }
             sys::run("/usr/sbin/system_profiler", &["SPBluetoothDataType", "-json"], Duration::from_secs(20)).map(|j| parse_bluetooth(&j))
         });
         Self { worker }
@@ -524,6 +560,14 @@ mod tests {
         let (c, g) = classify_temps(&all);
         assert_eq!(c, Some(55.0));
         assert_eq!(g, Some(45.0));
+    }
+
+    #[test]
+    fn linux_sensor_labels() {
+        let all = vec![("coretemp Package id 0".to_string(), 60.0), ("k10temp Tctl".into(), 70.0), ("amdgpu edge".into(), 50.0), ("nvme Composite".into(), 35.0)];
+        let (c, g) = classify_temps(&all);
+        assert_eq!(c, Some(65.0));
+        assert_eq!(g, Some(50.0));
     }
 
     #[test]

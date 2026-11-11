@@ -1,11 +1,12 @@
-//! Process table sampler: sysinfo (libproc / KERN_PROCARGS2 under the hood) for the tree, argv,
-//! cwd and CPU%, plus `proc_pid_rusage` for physical footprint, peak memory, CPU times, disk I/O
-//! and billed energy. Per-process network comes from `nettop` at a slow cadence.
+//! Process table sampler: sysinfo (libproc / KERN_PROCARGS2 or `/proc` under the hood) for the
+//! tree, argv, cwd and CPU%, plus `sys::rusage` for peak memory, CPU times and disk I/O (on macOS
+//! also physical footprint and billed energy). Per-process network comes from `nettop` on macOS
+//! and `ss` on Linux, at a slow cadence.
 
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
-use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
+use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System, ThreadKind, UpdateKind};
 
 use super::Background;
 use crate::model::Process;
@@ -30,6 +31,15 @@ pub fn parse_nettop(out: &str) -> HashMap<i32, (u64, u64)> {
 
 type NetRates = HashMap<i32, (f64, f64)>;
 
+/// Cumulative (received, sent) bytes per pid.
+fn net_counters() -> Option<HashMap<i32, (u64, u64)>> {
+    if cfg!(target_os = "linux") {
+        return crate::linux::socket_counters();
+    }
+    let out = sys::run("/usr/bin/nettop", &["-P", "-L", "1", "-n", "-x", "-J", "bytes_in,bytes_out"], Duration::from_secs(5))?;
+    Some(parse_nettop(&out))
+}
+
 struct NettopState {
     prev: Option<(Instant, HashMap<i32, (u64, u64)>)>,
 }
@@ -46,8 +56,8 @@ pub struct ProcessSampler {
     last: Instant,
     ticks: u64,
     prev: HashMap<i32, Prev>,
-    /// pid → (start_time, responsible pid); immutable for a process' lifetime.
-    responsible: HashMap<i32, (u64, i32)>,
+    /// pid → (start_time, responsible pid, app hint); immutable for a process' lifetime.
+    responsible: HashMap<i32, (u64, i32, Option<String>)>,
     net: Option<Background<NetRates>>,
 }
 
@@ -56,8 +66,7 @@ impl ProcessSampler {
     pub fn new(with_network: bool) -> Self {
         let net = with_network.then(|| {
             Background::spawn("nettop", Duration::from_secs(15), || NettopState { prev: None }, |st: &mut NettopState| {
-                let out = sys::run("/usr/bin/nettop", &["-P", "-L", "1", "-n", "-x", "-J", "bytes_in,bytes_out"], Duration::from_secs(5))?;
-                let cur = parse_nettop(&out);
+                let cur = net_counters()?;
                 let now = Instant::now();
                 let rates = match st.prev.take() {
                     Some((t0, prev)) => {
@@ -87,7 +96,10 @@ impl ProcessSampler {
             .with_exe(UpdateKind::OnlyIfNotSet)
             .with_cmd(UpdateKind::OnlyIfNotSet)
             .with_user(UpdateKind::OnlyIfNotSet)
-            .with_cwd(cwd);
+            .with_cwd(cwd)
+            // Linux lists every thread as a task: each would count as a process, with its whole
+            // process's memory.
+            .without_tasks();
         self.sys.refresh_processes_specifics(ProcessesToUpdate::All, true, kind);
         self.ticks += 1;
         let dt = self.last.elapsed().as_secs_f64().max(0.05);
@@ -100,25 +112,31 @@ impl ProcessSampler {
         let mut next_resp = HashMap::with_capacity(self.sys.processes().len());
         let mut out = Vec::with_capacity(self.sys.processes().len());
         for (pid, p) in self.sys.processes() {
+            // Tasks seen before they could be excluded stay in sysinfo's table. Kernel threads are
+            // real entries of their own: their CPU time belongs to the system.
+            if p.thread_kind() == Some(ThreadKind::Userland) {
+                continue;
+            }
             let pid = pid.as_u32() as i32;
             let ru = sys::rusage(pid);
             let prev = self.prev.get(&pid).copied();
-            let resp = match self.responsible.get(&pid) {
-                Some((st, r)) if *st == p.start_time() => *r,
-                _ => sys::responsible_pid(pid),
+            let (resp, hint) = match self.responsible.get(&pid) {
+                Some((st, r, h)) if *st == p.start_time() => (*r, h.clone()),
+                _ => (sys::responsible_pid(pid), sys::app_hint(pid)),
             };
-            next_resp.insert(pid, (p.start_time(), resp));
+            next_resp.insert(pid, (p.start_time(), resp, hint.clone()));
             let mut proc_ = Process {
                 pid,
                 ppid: p.parent().map(|x| x.as_u32() as i32).unwrap_or(0),
                 responsible_pid: resp,
+                app_hint: hint,
                 uid: p.user_id().map(|u| **u).unwrap_or(u32::MAX),
                 name: p.name().to_string_lossy().into_owned(),
                 executable_path: p.exe().map(|e| e.to_string_lossy().into_owned()).unwrap_or_default(),
                 argv: p.cmd().iter().map(|a| a.to_string_lossy().into_owned()).collect(),
                 cwd: p.cwd().map(|c| c.to_string_lossy().into_owned()).unwrap_or_default(),
                 start_time: p.start_time() as i64,
-                // sysinfo reports per-core % (0..n×100); normalise to % of the Mac.
+                // sysinfo reports per-core % (0..n×100); normalise to % of the machine.
                 cpu_pct: p.cpu_usage() as f64 / ncpu as f64,
                 mem_bytes: p.memory(),
                 ..Default::default()

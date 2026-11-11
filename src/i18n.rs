@@ -77,9 +77,19 @@ pub fn parse(src: &str) -> Vec<(String, String)> {
     out
 }
 
+/// Text that only holds on one OS ("% of Mac") has a `<key>.linux` variant, which replaces it on
+/// Linux. Keeping them in the same files means the translations can't drift apart.
+fn with_platform_overrides(mut table: HashMap<String, String>, linux: bool) -> HashMap<String, String> {
+    if linux {
+        let variants: Vec<(String, String)> = table.iter().filter_map(|(k, v)| Some((k.strip_suffix(".linux")?.to_string(), v.clone()))).collect();
+        table.extend(variants);
+    }
+    table
+}
+
 fn tables() -> &'static Vec<HashMap<String, String>> {
     static T: OnceLock<Vec<HashMap<String, String>>> = OnceLock::new();
-    T.get_or_init(|| SOURCES.iter().map(|s| parse(s).into_iter().collect()).collect())
+    T.get_or_init(|| SOURCES.iter().map(|s| with_platform_overrides(parse(s).into_iter().collect(), cfg!(target_os = "linux"))).collect())
 }
 
 fn index_of(lang: &str) -> usize {
@@ -106,13 +116,19 @@ pub fn system_language() -> String {
         {
             return first.to_string();
         }
-        std::env::var("LANG").ok().and_then(|l| l.split('.').next().map(str::to_string)).unwrap_or_else(|| "en".into())
+        // POSIX precedence; an empty variable counts as unset.
+        ["LC_ALL", "LC_MESSAGES", "LANG"]
+            .iter()
+            .find_map(|v| std::env::var(v).ok().filter(|l| !l.is_empty()))
+            .and_then(|l| l.split('.').next().map(str::to_string))
+            .unwrap_or_else(|| "en".into())
     })
     .clone()
 }
 
 /// The first language in the old-style plist `defaults read -g AppleLanguages` prints.
 /// `defaults` only quotes values that contain a dash, so `(en, "es-ES")` and `(es)` both occur.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn first_language(out: &str) -> Option<&str> {
     out.lines().map(|l| l.trim().trim_end_matches(',').trim_matches('"')).find(|l| !l.is_empty() && *l != "(" && *l != ")")
 }
@@ -208,6 +224,23 @@ mod tests {
             rest = &rest[a + b + 1..];
         }
         out
+    }
+
+    #[test]
+    fn linux_variants_replace_their_base_key_only_on_linux() {
+        let table: HashMap<String, String> = [("a", "Mac"), ("a.linux", "system"), ("b", "same")].iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
+        let on = with_platform_overrides(table.clone(), true);
+        assert_eq!((on["a"].as_str(), on["b"].as_str()), ("system", "same"));
+        let off = with_platform_overrides(table, false);
+        assert_eq!(off["a"], "Mac");
+    }
+
+    #[test]
+    fn every_linux_variant_has_a_base_key() {
+        let en = &tables()[0];
+        for k in en.keys().filter_map(|k| k.strip_suffix(".linux")) {
+            assert!(en.contains_key(k), "{k}.linux overrides nothing");
+        }
     }
 
     #[test]

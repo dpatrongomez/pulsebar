@@ -35,10 +35,10 @@ pub struct Dialog<'a> {
 
 /// Shows the dialog. `Some(true)` = confirmed, `Some(false)` = cancelled, `None` = still open.
 pub fn show(ctx: &egui::Context, d: &Dialog) -> Option<bool> {
-    let dark = ctx.style().visuals.dark_mode;
+    let dark = ctx.global_style().visuals.dark_mode;
     // Keys only count once the dialog was on screen in the previous frame, so the Return
     // that opened it (keyboard-activated button) cannot also confirm it.
-    let key = egui::Id::new(("dialog-open-frame", d.id));
+    let key = egui::Id::unique(("dialog-open-frame", d.id));
     let frame_nr = ctx.cumulative_frame_nr();
     let armed = ctx.data(|m| m.get_temp::<u64>(key)).is_some_and(|f| f + 1 == frame_nr);
     ctx.data_mut(|m| m.insert_temp(key, frame_nr));
@@ -51,7 +51,7 @@ pub fn show(ctx: &egui::Context, d: &Dialog) -> Option<bool> {
         .shadow(egui::epaint::Shadow { offset: [0, 10], blur: 36, spread: 0, color: Color32::from_black_alpha(if dark { 150 } else { 70 }) });
     let mut decided: Option<bool> = None;
     let mut cancel_focused = false;
-    egui::Modal::new(egui::Id::new(("dialog", d.id)))
+    egui::Modal::new(egui::Id::unique(("dialog", d.id)))
         .backdrop_color(Color32::from_black_alpha(if dark { 150 } else { 90 }))
         .frame(frame)
         .show(ctx, |ui| {
@@ -187,7 +187,7 @@ fn button(ui: &mut egui::Ui, text: &str, primary: Option<Color32>, dark: bool) -
     let galley = ui.painter().layout_no_wrap(text.to_string(), FontId::proportional(14.0), fg0);
     let size = Vec2::new((galley.size().x + 36.0).max(88.0), 32.0);
     let (r, resp) = ui.allocate_exact_size(size, Sense::click());
-    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), text));
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), text));
     let resp = resp.on_hover_cursor(egui::CursorIcon::PointingHand);
     let mut fill = match primary {
         Some(c) => c,

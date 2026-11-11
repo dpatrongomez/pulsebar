@@ -284,14 +284,16 @@ mod tests {
         let run = |ctx: &eframe::egui::Context, text: &mut String, focus: bool| {
             // The window must report focus, or egui keeps the text cursor (and `ime`) off.
             let raw = eframe::egui::RawInput { focused: true, ..Default::default() };
-            let out = ctx.run(raw, |ctx| {
-                eframe::egui::CentralPanel::default().show(ctx, |ui| {
+            let mut out = ctx.run_ui(raw, |ui| {
+                eframe::egui::CentralPanel::default().show(ui, |ui| {
                     let r = ui.text_edit_singleline(text);
                     if focus {
                         r.request_focus();
                     }
                 });
             });
+            // The test never paints, so the font texture deltas have nowhere to go.
+            out.textures_delta.clear();
             out.platform_output.ime.is_some()
         };
         assert!(!run(&ctx, &mut text, false), "no text field focused");

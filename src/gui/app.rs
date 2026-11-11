@@ -219,7 +219,7 @@ impl PulseApp {
                 s.visuals.window_fill = widgets::card_fill(theme == egui::Theme::Dark);
             });
         }
-        ctx.style_mut(|s| {
+        ctx.global_style_mut(|s| {
             if self.settings.compact {
                 s.spacing.item_spacing = Vec2::new(6.0, 3.0);
                 s.spacing.button_padding = Vec2::new(4.0, 1.0);
@@ -256,7 +256,7 @@ impl PulseApp {
     }
 
     fn pal(&self, ctx: &egui::Context) -> Palette {
-        widgets::palette(self.settings.theme, ctx.style().visuals.dark_mode)
+        widgets::palette(self.settings.theme, ctx.global_style().visuals.dark_mode)
     }
 
     fn toast(&mut self, s: impl Into<String>) {
@@ -368,7 +368,7 @@ impl PulseApp {
             return;
         }
         let modal = self.confirm.is_some() || !self.pending.is_empty();
-        let widget_focused = ctx.wants_keyboard_input();
+        let widget_focused = ctx.egui_wants_keyboard_input();
         let events = ctx.input(|i| i.events.clone());
         for e in events {
             let egui::Event::Key { key, pressed: true, repeat, modifiers, .. } = e else { continue };
@@ -1235,7 +1235,7 @@ impl PulseApp {
     // Overlays
     // ------------------------------------------------------------------------------------------
 
-    fn inspector_panel(&mut self, ctx: &egui::Context, snap: &Arc<Snapshot>) {
+    fn inspector_panel(&mut self, ui: &mut egui::Ui, snap: &Arc<Snapshot>) {
         let u = self.units();
         let i18n = self.i18n.clone();
         let Some(st) = self.inspector.as_mut() else { return };
@@ -1250,7 +1250,7 @@ impl PulseApp {
         let mut close = false;
         let mut quit = None;
         let mut toast = None;
-        egui::SidePanel::right("inspector").default_width(420.0).show(ctx, |ui| {
+        egui::Panel::right("inspector").default_size(420.0).show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.heading(i18n.t("insp.title"));
                 if ui.button("✕").clicked() {
@@ -1263,7 +1263,7 @@ impl PulseApp {
             };
             ui.horizontal(|ui| {
                 if ui.button(i18n.t("copy")).clicked() {
-                    ctx.copy_text(inspector::to_text_in(&i18n, &d, &u, cores));
+                    ui.ctx().copy_text(inspector::to_text_in(&i18n, &d, &u, cores));
                     toast = Some(i18n.t("insp.copied"));
                 }
                 if ui.button(i18n.t("insp.export_csv")).clicked() {
@@ -1411,38 +1411,33 @@ impl PulseApp {
     fn debug_screenshot(&mut self, ctx: &egui::Context) {
         let Some(path) = std::env::var_os("PULSEBAR_SCREENSHOT") else { return };
         let started = *self.started.get_or_insert_with(Instant::now);
-        let shot = ctx.input(|i| {
-            i.raw.events.iter().find_map(|e| match e {
-                egui::Event::Screenshot { image, .. } => Some(image.clone()),
-                _ => None,
-            })
-        });
-        if let Some(img) = shot {
-            let [w, h] = img.size;
-            let raw: Vec<u8> = img.pixels.iter().flat_map(|c| c.to_array()).collect();
-            if let Some(buf) = image::RgbaImage::from_raw(w as u32, h as u32, raw) {
-                let _ = buf.save(&path);
-            }
-            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-        } else if started.elapsed() > Duration::from_secs(8) && !self.screenshot_requested {
+        if started.elapsed() > Duration::from_secs(8) && !self.screenshot_requested {
             self.screenshot_requested = true;
-            ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(Default::default()));
+            let cb_ctx = ctx.clone();
+            ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(egui::ScreenshotCallback::new(
+                move |img| {
+                    let [w, h] = img.size;
+                    let raw: Vec<u8> = img.pixels.iter().flat_map(|c| c.to_array()).collect();
+                    if let Some(buf) = image::RgbaImage::from_raw(w as u32, h as u32, raw) {
+                        let _ = buf.save(&path);
+                    }
+                    cb_ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                },
+            )));
         }
         ctx.request_repaint_after(Duration::from_millis(200));
     }
 }
 
 impl eframe::App for PulseApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    /// Runs on every pass, and also while the window is hidden (other workspace, minimised):
+    /// eframe runs this without an egui pass there, which is what keeps the process answering
+    /// the compositor's ping instead of tripping its "application is not responding" dialog.
+    fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // Closing the window ends this process; the menu bar agent keeps running.
         let focused = ctx.input(|i| i.viewport().focused.unwrap_or(true));
         self.shared.foreground.store(focused, Ordering::Relaxed);
         self.handle_nav(ctx);
-        // ⌘F focuses the search field of the current tab's app list.
-        // Ignored while a dialog is open, like Esc in the search field.
-        if ctx.input_mut(|i| i.consume_shortcut(&egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::F))) && !self.dialog_open() {
-            self.focus_search = true;
-        }
         if self.last_pending_poll.elapsed() > Duration::from_secs(1) {
             let fresh = actions::list_pending();
             if !fresh.is_empty() && self.pending.is_empty() {
@@ -1451,13 +1446,22 @@ impl eframe::App for PulseApp {
             self.pending = fresh;
             self.last_pending_poll = Instant::now();
         }
-        self.toasts.retain(|(t, _)| t.elapsed() < Duration::from_secs(6));
         ctx.request_repaint_after(Duration::from_millis(1000));
+    }
 
-        self.debug_screenshot(ctx);
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        let ctx = ui.ctx().clone();
+        // ⌘F focuses the search field of the current tab's app list.
+        // Ignored while a dialog is open, like Esc in the search field.
+        if ctx.input_mut(|i| i.consume_shortcut(&egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::F))) && !self.dialog_open() {
+            self.focus_search = true;
+        }
+        self.toasts.retain(|(t, _)| t.elapsed() < Duration::from_secs(6));
+
+        self.debug_screenshot(&ctx);
         let snap = self.shared.snapshot.read().unwrap().clone();
         let Some(snap) = snap else {
-            egui::CentralPanel::default().show(ctx, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
                 ui.centered_and_justified(|ui| ui.label(self.i18n.t("sampling")));
             });
             return;
@@ -1467,21 +1471,21 @@ impl eframe::App for PulseApp {
             self.ask(&snap, Target::App(k), Mode::Quit);
         }
 
-                self.handle_shortcuts(ctx, &snap);
+        self.handle_shortcuts(&ctx, &snap);
         // The list on screen refills this while it is drawn.
         self.list_rows.clear();
 
-        self.sidebar(ctx, &snap);
+        self.sidebar(ui, &snap);
         if !self.toasts.is_empty() {
-            egui::TopBottomPanel::bottom("toasts").show(ctx, |ui| {
+            egui::Panel::bottom("toasts").show(ui, |ui| {
                 for (_, t) in &self.toasts {
                     ui.label(RichText::new(t).strong());
                 }
             });
         }
-        self.inspector_panel(ctx, &snap);
-        self.detail_panel(ctx, &snap);
-        egui::CentralPanel::default().show(ctx, |ui| {
+        self.inspector_panel(ui, &snap);
+        self.detail_panel(ui, &snap);
+        egui::CentralPanel::default().show(ui, |ui| {
             self.login_banner(ui);
             self.alerts_bar(ui, &snap);
             egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| match self.tab {
@@ -1499,12 +1503,12 @@ impl eframe::App for PulseApp {
                 Tab::Agents => self.agents_tab(ui, &snap),
                 Tab::Containers => self.containers_tab(ui, &snap),
                 Tab::History => self.history_tab(ui),
-                Tab::Settings => self.settings_tab(ui, ctx),
+                Tab::Settings => self.settings_tab(ui, &ctx),
             });
         });
         // Tabs without an app list ignore ⌘F; don't let the request linger into the next tab.
         self.focus_search = false;
-        self.dialogs(ctx, &snap);
+        self.dialogs(&ctx, &snap);
         self.scroll_to_sel = false;
         self.text_focus = ctx.output(|o| o.ime.is_some());
     }

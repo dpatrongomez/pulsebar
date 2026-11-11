@@ -63,13 +63,13 @@ pub(super) fn sections(tabs: &[TabSetting]) -> Vec<(Group, Vec<Tab>)> {
 }
 
 impl PulseApp {
-    pub(super) fn sidebar(&mut self, ctx: &egui::Context, snap: &Snapshot) {
-        let collapsed = ctx.content_rect().width() < COLLAPSE_BELOW;
-        let dark = ctx.style().visuals.dark_mode;
+    pub(super) fn sidebar(&mut self, ui: &mut egui::Ui, snap: &Snapshot) {
+        let collapsed = ui.ctx().content_rect().width() < COLLAPSE_BELOW;
+        let dark = ui.ctx().global_style().visuals.dark_mode;
         let fill = if dark { Color32::from_rgb(28, 28, 31) } else { Color32::from_rgb(230, 230, 235) };
         let frame = egui::Frame::new().fill(fill).inner_margin(egui::Margin::symmetric(8, 10));
         let width = if collapsed { NARROW } else { WIDE };
-        egui::SidePanel::left("sidebar").frame(frame).resizable(false).exact_width(width).show_separator_line(false).show(ctx, |ui| {
+        egui::Panel::left("sidebar").frame(frame).resizable(false).exact_size(width).show_separator_line(false).show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 2.0;
             let inner = width - 16.0;
             let sections = sections(&self.settings.tabs);
@@ -135,7 +135,7 @@ impl PulseApp {
         let (rect, resp) = ui.allocate_exact_size(Vec2::new(width, ROW_H), Sense::click());
         // Include the live value so screen readers get the glance too (also when it is not drawn).
         let a11y = mini.map_or_else(|| label.clone(), |m| format!("{label}, {m}"));
-        resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, selected, a11y.clone()));
+        resp.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, selected, a11y.clone()));
         // egui does not scroll to a focused custom widget on its own.
         if resp.gained_focus() {
             resp.scroll_to_me(None);
